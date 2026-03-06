@@ -201,8 +201,8 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
     rate_14 = gold_rates["14kt"]
     rate_18 = gold_rates["18kt"]
 
-    # Determine output format (match input)
-    out_ext = ".csv" if is_csv else ".xlsx"
+    # Always output CSV for downloads
+    out_ext = ".csv"
 
     if is_csv:
         rows = _read_csv_rows(source_file)
@@ -372,10 +372,13 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
             variants_updated += 1
             products_touched.add(current_handle)
 
-        # Save
+        # Export as CSV (always output CSV)
         output_path = generate_output_filename(suffix, ext=out_ext)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        wb.save(output_path)
+        with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            for row in ws.iter_rows(values_only=True):
+                writer.writerow(["" if v is None else v for v in row])
         wb.close()
 
     return output_path, variants_updated, len(products_touched)
