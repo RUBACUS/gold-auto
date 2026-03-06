@@ -1,118 +1,103 @@
 # TaaraLaxmii – Gold Price Updater
 
-An automated tool that scrapes live gold rates from the official **IBJA (India Bullion and Jewellers Association)** website twice a day, calculates updated prices for every product variant in your Shopify export sheet, and provides a **web-based dashboard** to trigger updates, preview sheets, and track every change — all with one click.
+An automated tool that scrapes live gold rates from **IBJA (India Bullion and Jewellers Association)** and **ibjarates.com**, recalculates every jewelry variant price using a full component-wise formula, and generates an updated CSV/XLSX ready to import into Shopify — complete with both **Variant Price** and **Compare At Price**.
+
+Features a **web dashboard** with role-based login, dual editable price charts, CSV/XLSX upload, and full rate & update history tracking.
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [How It Works — The Big Picture](#how-it-works--the-big-picture)
+- [How It Works](#how-it-works)
 - [Architecture Diagram](#architecture-diagram)
 - [Data Flow Diagram](#data-flow-diagram)
 - [Folder Structure](#folder-structure)
 - [File-by-File Explanation](#file-by-file-explanation)
-- [The Price Formula Explained](#the-price-formula-explained)
-- [Excel Sheet Structure](#excel-sheet-structure)
+- [The Price Formula](#the-price-formula)
+- [9KT Rate Calculation](#9kt-rate-calculation)
+- [Excel/CSV Sheet Structure](#excelcsv-sheet-structure)
 - [Database Schema](#database-schema)
 - [REST API Reference](#rest-api-reference)
 - [Web Dashboard Guide](#web-dashboard-guide)
-- [Installation Guide](#installation-guide)
+- [Installation](#installation)
 - [How to Run](#how-to-run)
-- [First Time Setup](#first-time-setup)
+- [First-Time Setup](#first-time-setup)
 - [Day-to-Day Usage](#day-to-day-usage)
-- [What Gets Updated and What Doesn't](#what-gets-updated-and-what-doesnt)
+- [What Gets Updated](#what-gets-updated)
 - [Troubleshooting](#troubleshooting)
-- [Future Roadmap](#future-roadmap)
 - [Tech Stack](#tech-stack)
 
 ---
 
 ## Overview
 
-**TaaraLaxmii** is a jewelry brand that sells on Shopify at [taaralaxmii.com](https://taaralaxmii.com/). Their products are made of gold and each product has multiple variants — different karat (9KT, 14KT, 18KT) and different diamond quality (GH I1-I2, GH SI).
-
-Gold prices change **twice a day** (AM and PM sessions) as published by IBJA. Every time gold rates change, the selling price of every product must be recalculated. Doing this manually for **939 products** and **36,000+ variants** is impossible.
-
-This project **automates that completely**.
+| Aspect | Detail |
+|---|---|
+| **Purpose** | Recalculate gold + diamond jewelry prices for Shopify based on live IBJA gold rates |
+| **Gold Purities** | 9KT, 14KT, 18KT |
+| **Pricing Columns** | Variant Price (col 24) + Compare At Price (col 25) |
+| **Data Sources** | [ibja.co](https://ibja.co/) (14KT, 18KT, Fine Gold 999) + [ibjarates.com](https://ibjarates.com/) (750 purity) |
+| **File Formats** | CSV and XLSX (input and output) |
+| **Authentication** | Session-based login with admin/editor and viewer roles |
+| **Products** | ~939 products, ~55,098 variant rows per run |
 
 ---
 
-## How It Works — The Big Picture
+## How It Works
 
 ```
-IBJA website publishes new gold rates (AM / PM)
-          │
-          ▼
-You click "Run Update Now" in the dashboard
-          │
-          ▼
-scraper.py fetches the latest 14KT and 18KT rate per gram from ibja.co
-          │
-          ▼
-update_prices.py compares new rate vs last stored rate → calculates delta
-          │
-          ▼
-For every 14KT and 18KT variant row in the Excel sheet:
-    new_price = old_price + (metal_weight × rate_delta)
-          │
-          ▼
-A brand-new timestamped Excel file is saved in updated_sheets/
-          │
-          ▼
-Rate and update details are stored in SQLite database (gold_updater.db)
-          │
-          ▼
-Download the new sheet from dashboard → upload to Shopify
+1. User logs in to the web dashboard
+2. Clicks "Run Pricing"
+3. System scrapes live gold rates from ibja.co + ibjarates.com
+4. Calculates 9KT rate: round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
+5. For each variant (9KT/14KT/18KT):
+   a. Reads gold weight, diamond weight, gemstone weight from sheet
+   b. Computes Variant Price (standard diamond rates)
+   c. Computes Compare At Price (higher diamond rates)
+6. Writes updated CSV/XLSX to updated_sheets/ folder
+7. User downloads and imports into Shopify
 ```
+
+Key difference from older versions: this is a **full recalculation** — every variant price is computed from scratch using the formula, not as a delta from previous rates.
 
 ---
 
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        USER (Browser)                           │
-│                  http://127.0.0.1:5000                          │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTP Requests
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Flask Web Server                            │
-│                         app.py                                  │
-│                                                                 │
-│   GET  /                     → renders dashboard page          │
-│   GET  /api/rates/current    → scrapes IBJA live                │
-│   GET  /api/rates/stored     → reads last baseline from DB      │
-│   GET  /api/rates/history    → past rate records from DB        │
-│   POST /api/update/run       → triggers price update engine     │
-│   POST /api/update/force     → sets new baseline (no changes)   │
-│   GET  /api/sheets           → lists all Excel files            │
-│   GET  /api/sheets/<f>/download → downloads a file              │
-│   GET  /api/sheets/<f>/preview  → previews first 100 rows       │
-│   GET  /api/logs             → update history from DB           │
-└──────┬───────────────┬──────────────────────┬───────────────────┘
-       │               │                      │
-       ▼               ▼                      ▼
-┌────────────┐  ┌──────────────┐   ┌─────────────────────┐
-│ scraper.py │  │  database.py │   │  update_prices.py   │
-│            │  │              │   │                     │
-│ Fetches    │  │ SQLite DB    │   │ Reads Excel,        │
-│ live rates │  │              │   │ applies delta,      │
-│ from       │  │ rate_history │   │ saves new file      │
-│ ibja.co    │  │ update_log   │   │ to updated_sheets/  │
-└────────────┘  └──────────────┘   └─────────────────────┘
-       │               │                      │
-       ▼               ▼                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       File System                               │
-│                                                                 │
-│  products_export_1.xlsx          ← Original Shopify export      │
-│  updated_sheets/                                                │
-│    products_20260306_1305_AM.xlsx  ← Generated output files     │
-│    products_20260306_1800_PM.xlsx                               │
-│  gold_updater.db                 ← SQLite database              │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────┐      ┌──────────────────┐      ┌─────────────────┐
+│  ibja.co    │      │  ibjarates.com   │      │  Browser (UI)   │
+│ (14KT,18KT │◄─────│  (750 purity)    │      │  Bootstrap 5    │
+│  Fine Gold) │      └──────────────────┘      └────────┬────────┘
+└──────┬──────┘                                         │
+       │                                                │ HTTP
+       ▼                                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│                      Flask App (app.py)                      │
+│                                                              │
+│  /login              → Login page                            │
+│  /api/auth/*         → Auth endpoints                        │
+│  /api/rates/*        → Live + stored rates                   │
+│  /api/config         → Editable rate charts (12 fields)      │
+│  /api/update/run     → Run Pricing (full recalculation)      │
+│  /api/update/force   → Set Baseline                          │
+│  /api/upload         → Upload CSV/XLSX source file           │
+│  /api/upload/list    → List all uploaded files               │
+│  /api/sheets         → List generated output files           │
+│  /api/sheets/*/dl    → Download output file                  │
+│  /api/logs           → Update logs                           │
+│  /api/diamond/logs   → Diamond update logs                   │
+│                                                              │
+├──────────┬───────────────┬────────────────┬──────────────────┤
+│scraper.py│ update_prices │  database.py   │                  │
+│          │    .py        │                │                  │
+└──────────┴───────────────┴────────────────┴──────────────────┘
+       │            │               │
+       ▼            ▼               ▼
+   Web Scrape   CSV/XLSX       SQLite DB
+   (requests)   (openpyxl/     (gold_updater.db)
+                 csv module)
 ```
 
 ---
@@ -120,52 +105,31 @@ Download the new sheet from dashboard → upload to Shopify
 ## Data Flow Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    FULL UPDATE DATA FLOW                         │
-└──────────────────────────────────────────────────────────────────┘
-
- ibja.co                scraper.py           database.py
-    │                       │                    │
-    │  HTTP GET ibja.co      │                    │
-    │◄──────────────────────│                    │
-    │  HTML page             │                    │
-    │──────────────────────►│                    │
-    │                       │ parse rates         │
-    │                       │ 14KT = ₹10,282/g    │
-    │                       │ 18KT = ₹12,912/g    │
-    │                       │                    │
-    │                       │  get_latest_rate() │
-    │                       │───────────────────►│
-    │                       │  {14kt: 10200,      │
-    │                       │   18kt: 12800}      │
-    │                       │◄───────────────────│
-    │                       │                    │
-    │                 delta_14 = 10282 - 10200 = +82
-    │                 delta_18 = 12912 - 12800 = +112
-    │                       │                    │
-    │              update_prices.py              │
-    │                       │                    │
-    │          Load products_export_1.xlsx        │
-    │          (or latest from updated_sheets/)   │
-    │                       │                    │
-    │          Pass 1: Build weight map           │
-    │          {product_handle → {14KT: 3.354g,  │
-    │                              18KT: 3.9g}}  │
-    │                       │                    │
-    │          Pass 2: For each 14KT/18KT row:   │
-    │          new_price = old + weight × delta  │
-    │          e.g. 73465 + 3.354×82 = 73740     │
-    │                       │                    │
-    │          9KT rows: SKIPPED (unchanged)      │
-    │                       │                    │
-    │          Save → products_20260306_1305_AM.xlsx
-    │                       │                    │
-    │                       │  save_rate()        │
-    │                       │───────────────────►│
-    │                       │  save_update_log() │
-    │                       │───────────────────►│
-    │                       │                    │
-    │         Return result to Flask → to Browser│
+ ibja.co ──────┐
+               ▼
+         ┌───────────┐     ┌──────────────┐
+         │ scraper.py │────►│  9KT Formula │
+         │            │     │  (calc from  │
+         │            │     │  Fine Gold,  │
+         └───────────┘     │  18KT, 750)  │
+               ▲            └──────┬───────┘
+ ibjarates.com─┘                   │
+                                   ▼
+ ┌──────────────┐         ┌──────────────────┐
+ │ Uploaded CSV │────────►│ update_prices.py  │
+ │ or default   │         │                  │
+ │ XLSX export  │         │ For each variant: │
+ └──────────────┘         │ • Variant Price   │
+                          │ • Compare At Price│
+       ┌─────────┐       └────────┬─────────┘
+       │ rate_    │                │
+       │ config   │◄───── rates + │
+       │ (12 flds)│       config   │
+       └─────────┘                ▼
+                          ┌──────────────────┐
+                          │  Output CSV/XLSX  │
+                          │  in updated_sheets│
+                          └──────────────────┘
 ```
 
 ---
@@ -174,29 +138,23 @@ Download the new sheet from dashboard → upload to Shopify
 
 ```
 gold auto/
-│
-├── app.py                     # Flask web server – all API routes
-├── scraper.py                 # Fetches live gold rates from ibja.co
-├── database.py                # SQLite database layer (history + logs)
-├── update_prices.py           # Price calculation and Excel update engine
-│
-├── products_export_1.xlsx     # Original Shopify product export (never modified)
-├── gold_updater.db            # SQLite database (auto-created on first run)
-├── requirements.txt           # Python package dependencies
-│
-├── templates/
-│   └── index.html             # The web dashboard page (Jinja2 template)
-│
+├── app.py                  # Flask web server (20 routes)
+├── scraper.py              # IBJA + ibjarates.com scraper + 9KT formula
+├── database.py             # SQLite DB layer (8 tables)
+├── update_prices.py        # Price recalculation engine (CSV + XLSX)
+├── requirements.txt        # Python dependencies
+├── gold_updater.db         # SQLite database (auto-created)
+├── products_export_1.xlsx  # Default Shopify product export (fallback)
 ├── static/
 │   ├── css/
-│   │   └── style.css          # Dashboard custom styles
+│   │   └── style.css       # Dashboard styling
 │   └── js/
-│       └── app.js             # Dashboard JavaScript (API calls, UI logic)
-│
-└── updated_sheets/            # All generated output Excel files (auto-created)
-    ├── products_20260306_1305_AM.xlsx
-    ├── products_20260306_1800_PM.xlsx
-    └── ...
+│       └── app.js          # Dashboard logic (fetch, config, upload)
+├── templates/
+│   ├── index.html          # Main dashboard (logged-in view)
+│   └── login.html          # Login page
+├── uploads/                # Uploaded CSV/XLSX source files
+└── updated_sheets/         # Generated output files (date-stamped)
 ```
 
 ---
@@ -204,545 +162,480 @@ gold auto/
 ## File-by-File Explanation
 
 ### `scraper.py`
-**What it does:** Connects to `https://ibja.co/` and extracts the current official gold rates.
 
-**How it works:**
-- Sends an HTTP GET request to ibja.co using the `requests` library
-- Parses the HTML with `BeautifulSoup` to extract plain text
-- Finds the "Retail selling Rates for Gold Jewellery" section
-- Extracts 14KT and 18KT rates per gram using regular expressions
-- Also extracts Fine Gold (999), 22KT, the session (AM/PM), and the date
+Scrapes gold rates from two sources:
 
-**Returns:**
-```python
-{
-    "14kt": 10282,       # ₹ per gram, excl. GST & making charges
-    "18kt": 12912,
-    "fine_gold": 15941,
-    "22kt": 15558,
-    "session": "AM",     # or "PM"
-    "date": "06/03/2026"
-}
+1. **[ibja.co](https://ibja.co/)** — Retail selling rates for Fine Gold 999, 22KT, 20KT, 18KT, 14KT, plus session (AM/PM) and date.
+2. **[ibjarates.com](https://ibjarates.com/)** — 750 purity gold rate.
+
+**9KT derivation:**
+```
+9KT = round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
 ```
 
-**Important:** Rates from IBJA are **per gram, excluding GST and making charges**.
-
----
+Returns a dictionary with all rates including `9kt` and `purity_750`.
 
 ### `database.py`
-**What it does:** Manages all persistent data using SQLite. This is a lightweight database stored as a single file (`gold_updater.db`) in the project folder — no external database server needed.
 
-**Tables:**
+Manages SQLite database with **8 tables**:
 
 | Table | Purpose |
 |---|---|
-| `rate_history` | Every IBJA rate that was scraped and saved |
-| `update_log` | Every time an Excel file was updated — before/after rates, variant counts |
+| `rate_history` | Every scraped IBJA rate (timestamped) |
+| `update_log` | Every pricing run result |
+| `diamond_rate_history` | Diamond rate change history |
+| `diamond_update_log` | Diamond pricing run results |
+| `base_rates` | Stored baseline rates |
+| `rate_config` | 12 editable fields (6 standard + 6 compare-at) |
+| `users` | Login credentials with roles |
+| `uploaded_files` | Uploaded source file tracking |
 
-**Key functions:**
-
-| Function | Description |
-|---|---|
-| `init_db()` | Creates tables if they don't exist yet (runs automatically on import) |
-| `save_rate(...)` | Saves a newly scraped rate to `rate_history` |
-| `get_latest_rate()` | Returns the most recently stored rate (used as baseline) |
-| `get_rate_history(limit)` | Returns last N rates for display in dashboard |
-| `save_update_log(...)` | Records an update event in `update_log` |
-| `get_update_logs(limit)` | Returns last N update events for display |
-
----
+Also handles:
+- User authentication with `werkzeug.security` password hashing
+- Default user seeding on first run
 
 ### `update_prices.py`
-**What it does:** This is the core engine. It takes the current and previous IBJA rates, calculates the difference (delta), and applies that delta to every eligible row in the Excel file.
 
-**Step-by-step logic:**
+The pricing engine. Key functions:
 
-1. **Scrape** current IBJA rates (calls `scraper.py`)
-2. **Load baseline** – retrieves the last stored rate from the database
-3. **First run check** – if no baseline exists, store current rate as baseline and stop (no Excel changes)
-4. **No-change check** – if rates are identical to baseline, stop and inform user
-5. **Find input file** – uses the latest file in `updated_sheets/`, or falls back to original `products_export_1.xlsx`
-6. **Pass 1 (weight map)** – reads the Excel once to build a dictionary: `{product_handle → {14KT weight, 18KT weight}}`
-7. **Pass 2 (price update)** – reads every row, applies the delta formula, writes new price
-8. **Skip logic** – 9KT rows are completely skipped. Compare At Price column is not touched.
-9. **Save** – writes to new timestamped file in `updated_sheets/`
-10. **Persist** – saves new rate and update log to database
+- **`update_excel_prices()`** — Reads source CSV/XLSX, recalculates every 9KT/14KT/18KT variant using the full formula, writes **both** Variant Price (col 24) and Compare At Price (col 25).
+- **`run_update()`** — Orchestrates: scrape rates → recalculate → save output → persist to DB.
+- **`_compute_variant_price()`** — Helper that applies the formula for one variant.
+- **`ceil_safe(x)`** — `math.ceil(round(x, 6))` to avoid floating-point ceiling errors.
 
-**The delta formula:**
-```
-new_price = old_price + metal_weight_grams × (new_rate_per_gram − old_rate_per_gram)
-```
-
----
+Supports both CSV and XLSX input/output (format matches the source file).
 
 ### `app.py`
-**What it does:** The Flask web server. It serves the dashboard HTML page and provides all the REST API endpoints that the frontend calls.
 
-**Concurrency safety:** Uses a `threading.Lock` to prevent two updates from running simultaneously if two people click the button at the same time.
+Flask web server with **20 routes**, role-based access control, file upload, and concurrent-update protection via threading lock.
 
-**Security:** The download and preview endpoints sanitize filenames using `os.path.basename()` to prevent path traversal attacks.
-
----
+Two roles:
+- **editor** — Can run pricing, set baseline, upload files, edit config
+- **viewer** — Read-only access to rates, sheets, logs
 
 ### `templates/index.html`
-**What it does:** The main (and only) web page of the dashboard. Uses **Bootstrap 5** for layout and styling, **Bootstrap Icons** for icons.
 
-**Sections:**
-- Navbar with live clock
-- Three rate cards: Live IBJA / Last Applied / Delta
-- Action buttons: Run Update / Set Baseline
-- Tabs: Sheets / Rate History / Update Logs
-- Modal: Sheet preview popup
+Main dashboard with:
+- Navbar with logged-in user badge + role indicator
+- 3 rate cards: Live IBJA Rates (with 750 purity + 9KT breakdown), Last Applied Rates, Rate Delta
+- 2 side-by-side config cards: **Variant Price Chart** (blue, 6 fields) and **Compare At Price Chart** (orange, 6 fields)
+- Action bar: Run Pricing, Set Baseline, Upload CSV/XLSX
+- 4 tabs: Generated Sheets, Uploaded Files, Rate History, Update Logs
 
----
+### `templates/login.html`
+
+Gold-themed gradient login page with Bootstrap 5. Redirects to dashboard on success.
 
 ### `static/js/app.js`
-**What it does:** All the browser-side JavaScript. Talks to the Flask API using `fetch()` and updates the page without reloading.
 
-**Key functions:**
-
-| Function | What it does |
-|---|---|
-| `fetchLiveRates()` | Calls `/api/rates/current`, updates Live Rate card |
-| `fetchStoredRate()` | Calls `/api/rates/stored`, updates Last Applied card |
-| `updateDelta()` | Calculates difference between live and stored, shows delta card |
-| `runUpdate()` | POSTs to `/api/update/run`, shows spinner, displays result |
-| `forceBaseline()` | POSTs to `/api/update/force` to recalibrate baseline |
-| `fetchSheets()` | Lists all Excel files in the Sheets tab |
-| `previewSheet(filename)` | Opens modal with first 100 rows of any sheet |
-| `fetchHistory()` | Loads Rate History tab data |
-| `fetchLogs()` | Loads Update Logs tab data |
-
----
+Frontend logic:
+- Dual config fetch/save (12 fields across both charts)
+- Live rates display with 9KT formula explanation
+- File upload with progress feedback
+- Sheet listing, download, and "Latest" tag
+- Uploaded files listing
 
 ### `static/css/style.css`
-Custom styling for rate cards, delta color coding (red for increase, green for decrease), table typography, and button states.
+
+Custom styling including:
+- `.card-config` — Blue gradient header for Variant Price Chart
+- `.card-compare` — Orange gradient header for Compare At Price Chart
+- Responsive table and badge styles
 
 ---
 
-### `products_export_1.xlsx`
-**The original Shopify product export file.** This file is **never modified** by the script. It only serves as the starting input on the very first update. After that, each subsequent update uses the most recently generated file from `updated_sheets/` as its input — so each run builds on top of the previous one.
+## The Price Formula
 
----
-
-### `gold_updater.db`
-An SQLite database file. Auto-created when you first run the app. Stores all rate history and update logs. You can open this file with any SQLite viewer (like [DB Browser for SQLite](https://sqlitebrowser.org/)) to inspect data manually.
-
----
-
-### `requirements.txt`
-Lists all Python packages needed. Install everything with one command (see Installation Guide).
-
----
-
-## The Price Formula Explained
-
-### Why a Delta Approach?
-
-Instead of recalculating prices from scratch every time (which would require knowing the exact making charges and diamond rates per product), this system uses a **delta (difference) approach**.
-
-When IBJA changes the rate, only the **gold cost component** changes. Diamond prices are fixed. Making charges are fixed. So:
+Every variant price is calculated using this formula:
 
 ```
-price_change = metal_weight × rate_change
+Price = ceil(gold_wt × gold_rate)
+      + ceil(diamond_wt × diamond_rate)
+      + ceil(gold_wt × making_charge)
+      + huid_per_pc
+      + ceil(diamond_wt × certification)
+      + ceil(gem_wt × colorstone_rate)
 ```
 
-If gold goes up by ₹100/gram and a product has 3.354g of 14KT gold, its price increases by:
+Where:
+- **`gold_wt`** — From col 50 (14KT), 51 (18KT), or 52 (9KT) in the sheet
+- **`gold_rate`** — Live-scraped from IBJA (14KT, 18KT) or calculated (9KT)
+- **`diamond_wt`** — From col 55 in the sheet
+- **`diamond_rate`** — From rate config (per carat, quality-specific: GH I1-I2 or GH SI)
+- **`making_charge`** — Editable per gram (default ₹2,500)
+- **`huid_per_pc`** — Flat charge per variant (default ₹100)
+- **`certification`** — Per carat diamond labour (default ₹500)
+- **`gem_wt`** — From col 60; **`colorstone_rate`** — Per carat (default ₹1,500)
+- **`ceil()`** — `ceil_safe()` = `math.ceil(round(x, 6))` to avoid FP ceiling artifacts
 
-```
-3.354 × 100 = ₹335.40 → rounded to ₹335
-```
+### Dual Pricing
 
-This is applied to every variant of that product.
+Two prices are calculated per variant:
 
-### Why 14KT and 18KT only?
+| Column | Name | Diamond Rates (defaults) | Purpose |
+|---|---|---|---|
+| **Col 24** | Variant Price | I1-I2: ₹39,500 · SI: ₹49,500 | Selling price (lower) |
+| **Col 25** | Compare At Price | I1-I2: ₹1,00,000 · SI: ₹1,25,000 | Strikethrough price (higher) |
 
-IBJA publishes official 14KT and 18KT rates directly. **9KT** pricing involves different purity calculations and was excluded from scope in Phase 1 of this project.
-
-### Why does color (Yellow/Rose/White) not affect price?
-
-Gold of the same karat but different color (alloyed differently) has the same gold content per gram. The cost difference is negligible and TaaraLaxmii prices all colors identically per karat.
-
-### Why does size not affect price?
-
-Each product has a defined metal weight (grams) that is fixed regardless of size variant in this catalog. The weight column in the sheet holds a single value per product.
+Both use the same formula but with different rate charts (all 6 fields are independently editable).
 
 ---
 
-## Excel Sheet Structure
+## 9KT Rate Calculation
 
-The Shopify export has **82 columns** and **55,124 data rows** (939 unique products × ~18 variants each). The key columns this project uses:
+9KT is not published by IBJA. It's derived from:
 
-| Column # | Column Name | Used For |
-|---|---|---|
-| 1 | Handle | Unique product identifier |
-| 13 | Option2 Value | Gold quality variant: `14KT-Yellow`, `18KT-Rose`, `9KT-White`, etc. |
-| 16 | Option3 Value | Diamond quality: `GH I1-I2`, `GH SI` |
-| 18 | Variant SKU | Unique variant code |
-| 24 | **Variant Price** | **The price this script updates** |
-| 25 | Variant Compare At Price | Original/crossed-out price (not modified in Phase 1) |
-| 50 | 14KT Metal Weight | Grams of 14KT gold in the product (stored only in first row of each product) |
-| 51 | 18KT Metal Weight | Grams of 18KT gold in the product |
-| 52 | 9KT Metal Weight | Grams of 9KT gold (not used in Phase 1) |
-| 55 | Diamond Total Weight | Total diamond carat weight |
+```
+9KT = round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
+```
 
-**Important detail about data layout:** In the Shopify export, product-level data (like metal weight) is only filled in the **first row** of each product. All subsequent variant rows for that product have `None`/blank in those columns. The script handles this by building a weight map in Pass 1 before updating prices in Pass 2.
+| Component | Source |
+|---|---|
+| Fine Gold 999 | ibja.co |
+| 18KT | ibja.co |
+| 750 purity | ibjarates.com |
+
+**Example (PM rates):**
+```
+Fine Gold 999 = 15,941
+18KT          = 12,912
+750 purity    = 11,956
+
+9KT = round(15,941 × 0.375 + (12,912 − 11,956))
+    = round(5,977.875 + 956)
+    = round(6,933.875)
+    = 6,934
+```
+
+---
+
+## Excel/CSV Sheet Structure
+
+The tool reads and writes Shopify product export files. Key columns (1-based):
+
+| Column | Header | Read/Write | Purpose |
+|---|---|---|---|
+| 1 | Handle | Read | Product identifier |
+| 13 | Option2 Value | Read | Gold quality (e.g. "14KT-Yellow") |
+| 16 | Option3 Value | Read | Diamond quality (e.g. "GH I1-I2") |
+| **24** | **Variant Price** | **Write** | Calculated selling price |
+| **25** | **Variant Compare At Price** | **Write** | Calculated strikethrough price |
+| 50 | Metafield (14KT weight) | Read | Gold weight in grams |
+| 51 | Metafield (18KT weight) | Read | Gold weight in grams |
+| 52 | Metafield (9KT weight) | Read | Gold weight in grams |
+| 55 | Metafield (Diamond weight) | Read | Diamond total weight in carats |
+| 60 | Metafield (Gemstone weight) | Read | Gemstone total weight in carats |
+
+All 82 columns are preserved in the output — only columns 24 and 25 are modified.
 
 ---
 
 ## Database Schema
 
-### Table: `rate_history`
+SQLite database (`gold_updater.db`) — auto-created on first run.
 
-Stores every IBJA rate that was fetched and saved.
+### `rate_history`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| timestamp | TEXT | ISO timestamp |
+| rate_14kt | REAL | 14KT rate scraped |
+| rate_18kt | REAL | 18KT rate scraped |
+| rate_fine | REAL | Fine Gold 999 rate |
+| session | TEXT | AM or PM |
+| rate_date | TEXT | Date from IBJA (dd/mm/yyyy) |
+| rate_9kt | REAL | Calculated 9KT rate |
 
-```sql
-CREATE TABLE rate_history (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT    NOT NULL,   -- ISO format: "2026-03-06T13:05:41"
-    rate_14kt   REAL    NOT NULL,   -- ₹ per gram e.g. 10282.0
-    rate_18kt   REAL    NOT NULL,   -- ₹ per gram e.g. 12912.0
-    rate_fine   REAL,               -- Fine gold 999 rate
-    session     TEXT,               -- "AM" or "PM"
-    rate_date   TEXT                -- Date from IBJA e.g. "06/03/2026"
-);
-```
+### `update_log`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| timestamp | TEXT | ISO timestamp |
+| old_rate_14kt | REAL | Previous 14KT rate |
+| old_rate_18kt | REAL | Previous 18KT rate |
+| new_rate_14kt | REAL | New 14KT rate |
+| new_rate_18kt | REAL | New 18KT rate |
+| input_file | TEXT | Source filename |
+| output_file | TEXT | Generated filename |
+| variants_updated | INTEGER | Count of variants changed |
+| products_updated | INTEGER | Count of products changed |
+| status | TEXT | "success" or error |
 
-### Table: `update_log`
+### `diamond_rate_history`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| timestamp | TEXT | ISO timestamp |
+| rate_i1i2 | REAL | GH I1-I2 rate per carat |
+| rate_si | REAL | GH SI rate per carat |
 
-Records every time an Excel file was generated.
+### `diamond_update_log`
+Same structure as `update_log` but for diamond rate changes.
 
-```sql
-CREATE TABLE update_log (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp           TEXT    NOT NULL,
-    old_rate_14kt       REAL    NOT NULL,   -- Rate before update
-    old_rate_18kt       REAL    NOT NULL,
-    new_rate_14kt       REAL    NOT NULL,   -- Rate after update
-    new_rate_18kt       REAL    NOT NULL,
-    input_file          TEXT    NOT NULL,   -- Which file was used as input
-    output_file         TEXT    NOT NULL,   -- Name of generated file
-    variants_updated    INTEGER NOT NULL,   -- e.g. 36732
-    products_updated    INTEGER NOT NULL,   -- e.g. 939
-    status              TEXT    NOT NULL DEFAULT 'success'
-);
-```
+### `base_rates`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| timestamp | TEXT | ISO timestamp |
+| rate_14kt | REAL | Baseline 14KT |
+| rate_18kt | REAL | Baseline 18KT |
+| rate_9kt | REAL | Baseline 9KT |
+
+### `rate_config`
+12 editable fields (6 standard + 6 compare-at):
+
+| Column | Default | Description |
+|---|---|---|
+| diamond_i1i2 | 39,500 | GH I1-I2 rate/carat (Variant Price) |
+| diamond_si | 49,500 | GH SI rate/carat (Variant Price) |
+| colorstone_rate | 1,500 | Gemstone rate/carat |
+| huid_per_pc | 100 | Flat charge per variant |
+| certification | 500 | Diamond labour/carat |
+| making_charge | 2,500 | Gold making charge/gram |
+| cmp_diamond_i1i2 | 1,00,000 | GH I1-I2 rate/carat (Compare At) |
+| cmp_diamond_si | 1,25,000 | GH SI rate/carat (Compare At) |
+| cmp_colorstone_rate | 1,500 | Gemstone rate/carat (Compare At) |
+| cmp_huid_per_pc | 100 | Flat charge (Compare At) |
+| cmp_certification | 500 | Diamond labour/carat (Compare At) |
+| cmp_making_charge | 2,500 | Making charge/gram (Compare At) |
+
+### `users`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| username | TEXT UNIQUE | Login username |
+| password_hash | TEXT | Werkzeug hashed password |
+| role | TEXT | "editor" or "viewer" |
+
+### `uploaded_files`
+| Column | Type | Description |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| timestamp | TEXT | Upload time |
+| filename | TEXT | Stored filename (UUID-prefixed) |
+| original_name | TEXT | User's original filename |
+| is_active | INTEGER | 1 = current source file |
 
 ---
 
 ## REST API Reference
 
-All endpoints return JSON. The `ok` field is `true` on success and `false` on error.
+All API endpoints require login unless noted. Editor-only endpoints require the `editor` role.
 
-### GET `/api/rates/current`
-Fetches live gold rates directly from ibja.co right now.
+### Authentication
 
-**Response:**
-```json
-{
-    "ok": true,
-    "rates": {
-        "14kt": 10282,
-        "18kt": 12912,
-        "fine_gold": 15941,
-        "22kt": 15558,
-        "session": "AM",
-        "date": "06/03/2026"
-    }
-}
-```
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/login` | — | Login page |
+| POST | `/api/auth/login` | — | `{"username", "password"}` → session cookie |
+| POST | `/api/auth/logout` | Any | Clear session |
+| GET | `/api/auth/me` | Any | Current user info |
 
----
+### Rates
 
-### GET `/api/rates/stored`
-Returns the last rate that was saved to the database (used as baseline for next update).
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/rates/current` | Any | Live-scrape IBJA + ibjarates.com |
+| GET | `/api/rates/stored` | Any | Last applied baseline rate |
+| GET | `/api/rates/history` | Any | Rate history (`?limit=50`) |
 
----
+### Config (Rate Charts)
 
-### GET `/api/rates/history?limit=50`
-Returns the last 50 rate records stored in the database.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/config` | Any | All 12 editable rate fields |
+| POST | `/api/config` | Editor | Update all 12 fields |
 
----
+### Update
 
-### POST `/api/update/run`
-Triggers the full update pipeline: scrape → compare → update Excel → save.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/update/run` | Editor | Scrape + recalculate + generate output file |
+| POST | `/api/update/force` | Editor | Store current IBJA rate as baseline |
 
-**Possible response statuses:**
+### File Upload
 
-| `status` value | Meaning |
-|---|---|
-| `baseline_set` | First ever run — baseline stored, no Excel changes |
-| `no_change` | IBJA rates haven't changed — no update needed |
-| `updated` | Prices updated, new Excel file generated |
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/upload` | Editor | Upload CSV/XLSX (multipart `file`) |
+| GET | `/api/upload/active` | Any | Current active source file info |
+| GET | `/api/upload/list` | Any | List all uploaded source files |
 
-**Success response (when updated):**
-```json
-{
-    "ok": true,
-    "status": "updated",
-    "message": "Prices updated for 36732 variants across 939 products.",
-    "output_file": "products_20260306_1305_AM.xlsx",
-    "variants_updated": 36732,
-    "products_updated": 939,
-    "delta_14kt": 82,
-    "delta_18kt": 112,
-    "old_rates": {"14kt": 10200, "18kt": 12800},
-    "new_rates": {"14kt": 10282, "18kt": 12912, ...}
-}
-```
+### Sheets (Output Files)
 
----
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/sheets` | Any | List all generated files with metadata |
+| GET | `/api/sheets/<filename>/download` | Any | Download a generated file |
 
-### POST `/api/update/force`
-Forces the current IBJA rate to become the new baseline **without changing any prices**. Use this when you upload a fresh Shopify export and want to re-sync the baseline to match what that sheet was priced at.
+### Logs
 
----
-
-### GET `/api/sheets`
-Lists all Excel files (original + all generated sheets) with metadata and linked update log info.
-
----
-
-### GET `/api/sheets/<filename>/download`
-Downloads the specified Excel file directly.
-
----
-
-### GET `/api/sheets/<filename>/preview?limit=100`
-Returns the first N rows (max 500) of a sheet as JSON, showing key columns only (Handle, Title, Gold Quality, Diamond Quality, SKU, Price, Compare Price, Weights).
-
----
-
-### GET `/api/logs?limit=50`
-Returns the last 50 update log entries.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/logs` | Any | Update history (`?limit=50`) |
+| GET | `/api/diamond/logs` | Any | Diamond update history |
 
 ---
 
 ## Web Dashboard Guide
 
-Open your browser and go to **http://127.0.0.1:5000**
+### Login
+Navigate to `http://127.0.0.1:5000`. You'll see a gold-themed login page.
+
+**Default credentials:**
+| Username | Password | Role |
+|---|---|---|
+| admin | admin123 | editor |
+| viewer | viewer123 | viewer |
+
+### Main Dashboard (after login)
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  💎 TaaraLaxmii – Gold Price Updater         [Live Clock]      │
-├────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────┐  │
-│  │ Live IBJA Rate  │  │ Last Applied    │  │ Rate Delta    │  │
-│  │                 │  │ Rate            │  │               │  │
-│  │ 14KT: ₹10,282   │  │ 14KT: ₹10,200  │  │ 14KT: +₹82   │  │
-│  │ 18KT: ₹12,912   │  │ 18KT: ₹12,800  │  │ 18KT: +₹112  │  │
-│  │ Session: AM     │  │ Applied: Today  │  │ ⚠ Update Now  │  │
-│  └─────────────────┘  └─────────────────┘  └───────────────┘  │
-│                                                                │
-│  [ ⚡ Run Update Now ]   [ 📌 Set Baseline ]                   │
-│                                                                │
-│ ┌── Sheets ──┬── Rate History ──┬── Update Logs ─────────┐    │
-│ │ File Name     │ Type     │ Rate Used  │ Updated │ Actions │   │
-│ │ products_...  │ Original │ —          │ —       │ ⬇ 👁  │   │
-│ │ products_...  │ Updated  │ ₹10,282    │ 36,732  │ ⬇ 👁  │   │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  TaaraLaxmii Gold Updater          [admin] editor  [Logout] │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Live IBJA    │  │ Last Applied │  │ Delta        │       │
+│  │ Rates        │  │ Rates        │  │              │       │
+│  │              │  │              │  │              │       │
+│  │ 14KT: 10537 │  │ 14KT: 10450 │  │ 14KT: +87   │       │
+│  │ 18KT: 12912 │  │ 18KT: 12800 │  │ 18KT: +112  │       │
+│  │ 9KT:  6934  │  │ 9KT:  6900  │  │ 9KT:  +34   │       │
+│  │ 750p: 11956 │  │              │  │              │       │
+│  │ 9KT = ...   │  │              │  │              │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│                                                              │
+│  ┌─── Variant Price Chart ───┐  ┌── Compare At Price Chart ─┐│
+│  │ (blue header, "Selling    │  │ (orange header,            ││
+│  │  Price" badge)            │  │  "Strikethrough" badge)    ││
+│  │                           │  │                            ││
+│  │ Diamond GH I1-I2: 39500  │  │ Diamond GH I1-I2: 100000  ││
+│  │ Diamond GH SI:    49500  │  │ Diamond GH SI:    125000  ││
+│  │ Colorstone Rate:  1500   │  │ Colorstone Rate:  1500    ││
+│  │ HUID per pc:      100    │  │ HUID per pc:      100     ││
+│  │ Certification:    500    │  │ Certification:    500     ││
+│  │ Making Charge:    2500   │  │ Making Charge:    2500    ││
+│  └───────────────────────────┘  └────────────────────────────┘│
+│                                                              │
+│  [Save Both Charts]                                          │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │ [Run Pricing]  [Set Baseline]  [Upload CSV / XLSX]       ││
+│  └──────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │ [Generated Sheets] [Uploaded Files] [Rate Hist] [Logs]   ││
+│  │                                                          ││
+│  │  products_20250609_1430_PM.csv  [Latest]  [Download]     ││
+│  │  products_20250609_1105_AM.xlsx           [Download]     ││
+│  │  ...                                                     ││
+│  └──────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Rate Cards
-- **Live IBJA Rate** — Pulls the current rate from ibja.co every time you click the refresh button or load the page
-- **Last Applied Rate** — The rate that was used in the most recent Excel update (stored in database)
-- **Rate Delta** — The difference between live and stored. Goes **red** when rates went up (prices will increase), **green** when rates went down. Shows "Update Available" badge when a change is detected.
-
-### Buttons
-- **Run Update Now** — Runs the complete pipeline. Shows a spinner while processing. After completion, shows a success/info/no-change alert and refreshes all tabs.
-- **Set Baseline** — Use this when you've just downloaded a fresh Shopify export and replaced `products_export_1.xlsx`. This tells the system "the current IBJA rate is what that sheet was priced at" — so the next update only adjusts from this point.
-
-### Sheets Tab
-- Lists all Excel files in the project
-- Shows file size, what rate was used, and how many variants were updated
-- **Download** button (↓) saves the file to your computer
-- **Preview** button (👁) opens a popup showing the first 100 rows of that file
-
-### Rate History Tab
-Shows every rate recorded in the database — timestamp, 14KT/18KT values, AM/PM session, and the IBJA date. Newest first.
-
-### Update Logs Tab
-Shows every time an Excel file was generated — old rate, new rate, delta, output filename, number of variants updated. Full audit trail.
+**Viewer role:** Can see everything but action buttons (Run Pricing, Set Baseline, Upload, Save Charts) are hidden.
 
 ---
 
-## Installation Guide
+## Installation
 
 ### Prerequisites
 
-Before starting, make sure you have the following installed on your computer:
+- **Python 3.10+** (tested with 3.12)
+- **pip** (comes with Python)
 
-1. **Python 3.10 or higher**
-   - Download from: https://www.python.org/downloads/
-   - During installation, check ✅ "Add Python to PATH"
-   - Verify: open Command Prompt, type `python --version`
-
-2. **pip** (comes with Python automatically)
-   - Verify: `pip --version`
-
-3. **Internet connection** — needed to fetch rates from ibja.co
-
----
-
-### Step-by-Step Installation
-
-**Step 1 — Get the project files**
-
-The project folder is already set up at:
-```
-C:\Users\devil\OneDrive\Desktop\gold auto\
-```
-
-If you're setting this up on a new machine, copy the entire folder there.
-
-**Step 2 — Open a terminal in the project folder**
-
-Option A — PowerShell:
-```powershell
-cd "C:\Users\devil\OneDrive\Desktop\gold auto"
-```
-
-Option B — Right-click the folder in File Explorer → "Open in Terminal"
-
-**Step 3 — Install required packages**
+### Steps
 
 ```bash
+# 1. Clone or download the project
+cd "gold auto"
+
+# 2. Install dependencies
 pip install -r requirements.txt
 ```
 
 This installs:
+- `flask==3.1.0` — Web framework
+- `openpyxl==3.1.5` — Excel read/write
+- `requests==2.32.3` — HTTP client for scraping
+- `beautifulsoup4==4.13.3` — HTML parsing
 
-| Package | Version | Purpose |
-|---|---|---|
-| `flask` | 3.1.0+ | Web server framework |
-| `openpyxl` | 3.1.5+ | Read and write Excel .xlsx files |
-| `requests` | 2.32.3+ | Make HTTP requests to ibja.co |
-| `beautifulsoup4` | 4.13.3+ | Parse HTML from ibja.co |
-
-**Step 4 — Verify installation**
-
-```bash
-python -c "import flask, openpyxl, requests, bs4; print('All OK')"
-```
-
-Should print: `All OK`
-
-**Step 5 — Confirm your Excel file is in place**
-
-Make sure `products_export_1.xlsx` (your Shopify product export) is in the project folder.
+No additional setup needed — the SQLite database, folders, and default users are auto-created on first run.
 
 ---
 
 ## How to Run
 
-Open a terminal in the project folder and run:
-
 ```bash
 python app.py
 ```
 
-You should see:
-```
- * Serving Flask app 'app'
- * Running on http://127.0.0.1:5000
-```
-
-Then open your browser and go to: **http://127.0.0.1:5000**
-
-> To stop the server, press `Ctrl+C` in the terminal.
+Opens at: **http://127.0.0.1:5000**
 
 ---
 
-## First Time Setup
-
-The very first time you run this tool after setting it up with a fresh Shopify export sheet, follow these steps:
+## First-Time Setup
 
 1. **Start the server:** `python app.py`
-2. **Open the dashboard:** http://127.0.0.1:5000
-3. **Set the baseline:**
-   - Click **"Set Baseline"** button
-   - This records the current IBJA rate as the starting point
-   - No Excel file will be generated yet — this just calibrates the system
-4. **Confirm:** The "Last Applied Rate" card now shows today's current rate
-
-From now on, every time IBJA publishes new rates and you click **"Run Update Now"**, the system will calculate how much prices changed since this baseline and generate an updated sheet.
+2. **Open browser:** http://127.0.0.1:5000
+3. **Log in** with `admin` / `admin123`
+4. **Upload your Shopify product export** (CSV or XLSX) via the Upload button — or place it as `products_export_1.xlsx` in the project root
+5. **Review the rate charts** — adjust diamond rates, making charge, etc. as needed for both Variant Price and Compare At Price charts
+6. **Click "Set Baseline"** to store the current IBJA rate
+7. **Click "Run Pricing"** to generate your first output file
+8. **Download** the generated file and import into Shopify
 
 ---
 
 ## Day-to-Day Usage
 
-IBJA updates gold rates **twice a day**: once in the morning (AM) and once in the evening (PM).
+1. Open dashboard, log in
+2. Check the Live IBJA Rates card — rates update automatically (AM and PM sessions)
+3. Click **Run Pricing** — generates a new output file with recalculated prices
+4. Go to **Generated Sheets** tab, download the latest file (marked with **Latest** badge)
+5. Import into Shopify
 
-**Recommended routine:**
-
-**Morning (after AM rates publish):**
-1. Open http://127.0.0.1:5000
-2. Check if the **Delta card** shows "Update Available"
-3. If yes → click **"Run Update Now"**
-4. Once complete, download the new `.xlsx` file from the Sheets tab
-5. Upload it to Shopify
-
-**Evening (after PM rates publish):**
-1. Repeat the same steps
-
-**Note:** If you click "Run Update Now" and rates haven't changed, the system will simply say "No change needed" — no new file is generated and nothing is overwritten.
+If diamond rates or making charges change, update them in the price chart cards and click **Save Both Charts** before running pricing.
 
 ---
 
-## What Gets Updated and What Doesn't
+## What Gets Updated
 
-| Element | Updated? | Notes |
+| What | Updated? | Details |
 |---|---|---|
-| **14KT variant prices** | ✅ Yes | Delta formula applied using 14KT metal weight |
-| **18KT variant prices** | ✅ Yes | Delta formula applied using 18KT metal weight |
-| **9KT variant prices** | ❌ No | Skipped in Phase 1 — to be added later |
-| **Compare At Price** | ❌ No | Skipped in Phase 1 — to be configured later |
-| **Color variants** (Yellow/Rose/White) | N/A | Same product, same weight → same price change |
-| **Size variants** | N/A | Size doesn't affect metal weight in this catalog |
-| **Diamond quality** (GH SI, GH I1-I2) | N/A | Diamond cost is fixed; only gold delta applies |
-| **Original file** (`products_export_1.xlsx`) | ❌ Never | Original is never touched |
+| **9KT variants** | ✅ Yes | Using derived 9KT rate from ibjarates formula |
+| **14KT variants** | ✅ Yes | Using live 14KT from ibja.co |
+| **18KT variants** | ✅ Yes | Using live 18KT from ibja.co |
+| **Variant Price (col 24)** | ✅ Yes | Standard rate chart |
+| **Compare At Price (col 25)** | ✅ Yes | Higher-rate chart (strikethrough) |
+| **Color variants** (Yellow/Rose/White) | N/A | Same product, same weight → same price |
+| **Diamond quality** (GH SI, GH I1-I2) | ✅ Yes | Quality-specific diamond rates applied |
+| **Original file** | ❌ Never | Original upload is never modified |
 
 ---
 
 ## Troubleshooting
 
 ### "Could not find 'Retail selling Rates' section on IBJA page"
-- IBJA's website structure may have changed temporarily, or the site is down
-- Try refreshing in 15–30 minutes
-- Check https://ibja.co/ manually in your browser
+- IBJA's website structure may have changed or the site is temporarily down
+- Try again in 15–30 minutes
+- Check https://ibja.co/ manually
+
+### "Could not find 750 purity rate on ibjarates.com"
+- ibjarates.com may be down or have changed its HTML structure
+- Check https://ibjarates.com/ manually
 
 ### Browser shows "This site can't be reached"
-- The Flask server is not running
-- Open a terminal, navigate to the project folder, and run `python app.py`
+- Flask server is not running — run `python app.py`
 
-### "No baseline set yet" shown on dashboard
-- This is normal for a fresh setup
-- Click "Set Baseline" to initialize
+### Login fails with default credentials
+- On first start, `admin/admin123` and `viewer/viewer123` are auto-seeded
+- If the database was deleted or recreated, restart the server
 
-### Updated sheet file size is smaller than original
-- Normal — openpyxl does not preserve all Excel formatting metadata from Shopify exports
-- The data (all 82 columns, all rows) is complete; only formatting differences may exist
-
-### The price didn't change even though IBJA published new rates
-- Check the Rate History tab — if the new rate was already stored as baseline, then there's no delta to apply
-- This happens if you clicked "Set Baseline" after the rates changed but before running the update
-
-### Error when running `pip install -r requirements.txt`
-- Ensure Python and pip are correctly installed
-- Try: `python -m pip install -r requirements.txt`
-
----
-
-## Future Roadmap
-
-The following features are planned for future phases:
-
-- **9KT price calculation** — calculating 9KT prices using a separate formula
-- **Compare At Price update** — updating the compare/original price column proportionally
-- **Direct Shopify API upload** — pushing the updated sheet directly to Shopify without manual download/upload
-- **Scheduled automation** — auto-run twice a day using Windows Task Scheduler (AM and PM)
-- **Email/WhatsApp notification** — alert when rates change and update is available
-- **Multi-file support** — handling multiple product export files simultaneously
+### Output file is smaller than original
+- Normal — openpyxl doesn't preserve all Excel formatting metadata
+- All 82 columns and all data rows are complete
 
 ---
 
@@ -752,18 +645,9 @@ The following features are planned for future phases:
 |---|---|
 | **Backend** | Python 3.12, Flask 3.1 |
 | **Web Scraping** | requests, BeautifulSoup4 |
-| **Excel Processing** | openpyxl |
-| **Database** | SQLite (via Python's built-in `sqlite3`) |
-| **Frontend** | HTML5, Bootstrap 5.3, Bootstrap Icons, Vanilla JavaScript (ES6+) |
-| **Data Source** | [ibja.co](https://ibja.co/) – India Bullion and Jewellers Association |
+| **Excel Processing** | openpyxl, csv (stdlib) |
+| **Database** | SQLite (Python's built-in `sqlite3`) |
+| **Auth** | Flask sessions, werkzeug password hashing |
+| **Frontend** | HTML5, Bootstrap 5.3.3, Bootstrap Icons, Vanilla JS (ES6+) |
+| **Data Sources** | [ibja.co](https://ibja.co/) + [ibjarates.com](https://ibjarates.com/) |
 | **Target Platform** | Shopify (product export/import via CSV/XLSX) |
-
----
-
-## Notes
-
-> All IBJA rates are **per gram, excluding 3% GST and making charges**, as stated on the IBJA website.
-
-> The tool currently handles **939 products** and **55,124 rows** in the Excel sheet, updating **36,732 variant prices** (14KT + 18KT across all color variants) per run.
-
-> The original `products_export_1.xlsx` is **never modified**. Every update creates a new file in the `updated_sheets/` folder, so you always have a complete history.

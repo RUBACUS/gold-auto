@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+gold_updater.db
+updated_sheets/
+uploads/
+.env
