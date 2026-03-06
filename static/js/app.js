@@ -97,8 +97,7 @@ async function fetchLiveRates() {
         '<div class="rate-row"><span class="rate-label">Fine Gold (999)</span><span class="rate-value" style="font-size:1.1rem">' + fmt(liveRates.fine_gold) + '</span></div>' +
         '<div class="rate-row"><span class="rate-label">750 Purity</span><span class="rate-value" style="font-size:1rem">' + fmt(liveRates.purity_750) + '</span></div>' +
         '<div class="mt-2 text-muted" style="font-size:0.8rem">' + sessionBadge + ' &nbsp; Date: ' + (liveRates.date || "\u2014") +
-        ' &nbsp;<span class="text-secondary">\u00b7 per gram, excl. GST</span></div>' +
-        '<div class="mt-1 small text-info"><i class="bi bi-calculator me-1"></i>9KT = round(999\u00d70.375 + (18KT\u2212750)) = ' + fmt(liveRates["9kt"]) + '</div>';
+        ' &nbsp;<span class="text-secondary">\u00b7 per gram, excl. GST</span></div>';
 
     updateDelta();
 }
@@ -404,18 +403,33 @@ async function fetchSheets() {
             ? log.variants_updated.toLocaleString() + ' / ' + log.products_updated
             : '\u2014';
 
+        var deleteBtn = USER_ROLE === 'editor'
+            ? '<button class="btn btn-sm btn-outline-danger" title="Delete" onclick="deleteSheet(' + JSON.stringify(s.filename) + ')"><i class="bi bi-trash"></i></button>'
+            : '';
+
         html += '<tr' + (isLatest ? ' class="table-row-latest"' : '') + '>' +
             '<td>' + (i + 1) + '</td>' +
             '<td><span class="sheet-name">' + s.filename + '</span>' + latestBadge + '</td>' +
             '<td>' + fmtSize(s.size_kb) + '</td>' +
             '<td class="d-none d-md-table-cell" style="font-size:0.85rem">' + rateInfo + '</td>' +
             '<td class="d-none d-md-table-cell" style="font-size:0.85rem">' + variants + '</td>' +
-            '<td><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="btn btn-sm btn-outline-success me-1" title="Download"><i class="bi bi-download"></i></a></td>' +
+            '<td><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="btn btn-sm btn-outline-success me-1" title="Download"><i class="bi bi-download"></i></a>' + deleteBtn + '</td>' +
             '</tr>';
     });
 
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+async function deleteSheet(filename) {
+    if (!confirm('Delete "' + filename + '"?')) return;
+    var data = await api('/api/sheets/' + encodeURIComponent(filename) + '/delete', { method: 'DELETE' });
+    if (data.ok) {
+        showAlert('File deleted.', 'success');
+        fetchSheets();
+    } else {
+        showAlert(data.error || 'Delete failed.', 'danger');
+    }
 }
 
 // == Rate History ==

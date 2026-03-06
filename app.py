@@ -287,8 +287,8 @@ def api_list_sheets():
     sheets = []
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    for fname in sorted(os.listdir(OUTPUT_DIR), reverse=True):
-        if (fname.endswith(".xlsx") or fname.endswith(".csv")) and not fname.startswith("~$"):
+    for fname in os.listdir(OUTPUT_DIR):
+        if fname.endswith(".csv") and not fname.startswith("~$"):
             fpath = os.path.join(OUTPUT_DIR, fname)
             stat = os.stat(fpath)
             sheets.append({
@@ -297,6 +297,7 @@ def api_list_sheets():
                 "size_kb": round(stat.st_size / 1024),
                 "modified": os.path.getmtime(fpath),
             })
+    sheets.sort(key=lambda x: x["modified"], reverse=True)
 
     # Attach update-log info
     logs = {log["output_file"]: log for log in get_update_logs(200)}
@@ -319,6 +320,21 @@ def api_download_sheet(filename):
         return send_from_directory(OUTPUT_DIR, safe, as_attachment=True)
 
     return jsonify({"ok": False, "error": "File not found"}), 404
+
+
+@app.route("/api/sheets/<filename>/delete", methods=["DELETE"])
+@editor_required
+def api_delete_sheet(filename):
+    safe = os.path.basename(filename)
+    if safe != filename:
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
+
+    fpath = os.path.join(OUTPUT_DIR, safe)
+    if not os.path.isfile(fpath):
+        return jsonify({"ok": False, "error": "File not found"}), 404
+
+    os.remove(fpath)
+    return jsonify({"ok": True})
 
 
 
