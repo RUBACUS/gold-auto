@@ -1,0 +1,508 @@
+// == Helpers ==
+
+function fmt(n) {
+    if (n == null) return "\u2014";
+    return "\u20b9 " + Number(n).toLocaleString("en-IN");
+}
+
+function fmtDelta(n) {
+    if (n == null) return "\u2014";
+    var sign = n > 0 ? "+" : "";
+    return sign + "\u20b9 " + Number(n).toLocaleString("en-IN");
+}
+
+function fmtDate(iso) {
+    if (!iso) return "\u2014";
+    var d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", hour12: true
+    });
+}
+
+function fmtSize(kb) {
+    if (kb > 1024) return (kb / 1024).toFixed(1) + " MB";
+    return kb + " KB";
+}
+
+function showAlert(msg, type) {
+    type = type || "info";
+    var area = document.getElementById("alert-area");
+    var id = "alert-" + Date.now();
+    area.innerHTML =
+        '<div id="' + id + '" class="alert alert-' + type + ' alert-dismissible fade show" role="alert">' +
+        msg +
+        '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+        '</div>';
+    setTimeout(function() {
+        var el = document.getElementById(id);
+        if (el) el.remove();
+    }, 8000);
+}
+
+async function api(url, opts) {
+    opts = opts || {};
+    var resp = await fetch(url, opts);
+    if (resp.status === 401) {
+        window.location.href = "/login";
+        return { ok: false, error: "Session expired" };
+    }
+    return resp.json();
+}
+
+// == State ==
+var liveRates = null;
+var storedRate = null;
+
+// == Clock ==
+function tickClock() {
+    var el = document.getElementById("clock");
+    if (el) {
+        var now = new Date();
+        el.textContent = now.toLocaleString("en-IN", {
+            weekday: "short", day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+        });
+    }
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// == Logout ==
+async function doLogout() {
+    await api("/api/auth/logout", { method: "POST" });
+    window.location.href = "/login";
+}
+
+// == Live Rates ==
+async function fetchLiveRates() {
+    var card = document.getElementById("live-rate-card");
+    card.innerHTML = '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Fetching from IBJA\u2026</div>';
+
+    var data = await api("/api/rates/current");
+    if (!data.ok) {
+        card.innerHTML = '<div class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>' + data.error + '</div>';
+        return;
+    }
+
+    liveRates = data.rates;
+    var sessionBadge = liveRates.session === "AM"
+        ? '<span class="badge bg-primary session-badge">AM</span>'
+        : '<span class="badge session-badge" style="background:#7952b3">PM</span>';
+
+    card.innerHTML =
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(liveRates["9kt"]) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(liveRates["14kt"]) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value">' + fmt(liveRates["18kt"]) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">Fine Gold (999)</span><span class="rate-value" style="font-size:1.1rem">' + fmt(liveRates.fine_gold) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">750 Purity</span><span class="rate-value" style="font-size:1rem">' + fmt(liveRates.purity_750) + '</span></div>' +
+        '<div class="mt-2 text-muted" style="font-size:0.8rem">' + sessionBadge + ' &nbsp; Date: ' + (liveRates.date || "\u2014") +
+        ' &nbsp;<span class="text-secondary">\u00b7 per gram, excl. GST</span></div>' +
+        '<div class="mt-1 small text-info"><i class="bi bi-calculator me-1"></i>9KT = round(999\u00d70.375 + (18KT\u2212750)) = ' + fmt(liveRates["9kt"]) + '</div>';
+
+    updateDelta();
+}
+
+// == Stored Rates ==
+async function fetchStoredRate() {
+    var card = document.getElementById("stored-rate-card");
+    var data = await api("/api/rates/stored");
+
+    if (!data.ok || !data.rate) {
+        card.innerHTML = '<div class="text-muted text-center py-3"><i class="bi bi-info-circle me-1"></i>No baseline set yet.</div>';
+        storedRate = null;
+        updateDelta();
+        return;
+    }
+
+    storedRate = data.rate;
+    card.innerHTML =
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(storedRate.rate_9kt) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(storedRate.rate_14kt) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value">' + fmt(storedRate.rate_18kt) + '</span></div>' +
+        '<div class="mt-2 text-muted" style="font-size:0.8rem"><i class="bi bi-clock me-1"></i>' + fmtDate(storedRate.timestamp) + ' &nbsp; <span class="badge bg-secondary session-badge">' + (storedRate.session || "") + '</span></div>';
+
+    updateDelta();
+}
+
+// == Delta ==
+function updateDelta() {
+    var card = document.getElementById("delta-card");
+    if (!liveRates || !storedRate) {
+        card.innerHTML = '<div class="text-center text-muted">Waiting for both rates\u2026</div>';
+        return;
+    }
+
+    var d9 = liveRates["9kt"] - (storedRate.rate_9kt || 0);
+    var d14 = liveRates["14kt"] - storedRate.rate_14kt;
+    var d18 = liveRates["18kt"] - storedRate.rate_18kt;
+    function cls(d) { return d > 0 ? "delta-positive" : d < 0 ? "delta-negative" : "delta-zero"; }
+    function icon(d) { return d > 0 ? "bi-arrow-up" : d < 0 ? "bi-arrow-down" : "bi-dash"; }
+    var needUpdate = d9 !== 0 || d14 !== 0 || d18 !== 0;
+
+    card.innerHTML =
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value ' + cls(d9) + '"><i class="bi ' + icon(d9) + '"></i> ' + fmtDelta(d9) + '/g</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value ' + cls(d14) + '"><i class="bi ' + icon(d14) + '"></i> ' + fmtDelta(d14) + '/g</span></div>' +
+        '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value ' + cls(d18) + '"><i class="bi ' + icon(d18) + '"></i> ' + fmtDelta(d18) + '/g</span></div>' +
+        '<div class="text-center mt-2">' +
+        (needUpdate
+            ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Update Available</span>'
+            : '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Up to Date</span>') +
+        '</div>';
+}
+
+// == Rate Config (both charts) ==
+
+async function fetchConfig() {
+    var data = await api("/api/config");
+    if (!data.ok) return;
+
+    var cfg = data.config;
+    function setVal(id, val) {
+        var el = document.getElementById(id);
+        if (el) el.value = val;
+    }
+
+    // Standard chart
+    setVal("cfg-i1i2", cfg.diamond_i1i2);
+    setVal("cfg-si", cfg.diamond_si);
+    setVal("cfg-colorstone", cfg.colorstone_rate);
+    setVal("cfg-huid", cfg.huid_per_pc);
+    setVal("cfg-cert", cfg.certification);
+    setVal("cfg-making", cfg.making_charge);
+
+    // Compare-at chart
+    setVal("cmp-i1i2", cfg.cmp_diamond_i1i2);
+    setVal("cmp-si", cfg.cmp_diamond_si);
+    setVal("cmp-colorstone", cfg.cmp_colorstone_rate);
+    setVal("cmp-huid", cfg.cmp_huid_per_pc);
+    setVal("cmp-cert", cfg.cmp_certification);
+    setVal("cmp-making", cfg.cmp_making_charge);
+
+    var status = document.getElementById("config-status");
+    if (status) {
+        if (cfg.timestamp) {
+            status.innerHTML = '<i class="bi bi-check-circle text-success me-1"></i>Last saved: ' + fmtDate(cfg.timestamp);
+        } else {
+            status.innerHTML = '<i class="bi bi-info-circle me-1"></i>Using default values';
+        }
+    }
+}
+
+async function saveConfig() {
+    var btn = document.getElementById("btn-save-config");
+    function getVal(id) { return parseFloat((document.getElementById(id) || {}).value); }
+
+    var payload = {
+        diamond_i1i2: getVal("cfg-i1i2"),
+        diamond_si: getVal("cfg-si"),
+        colorstone_rate: getVal("cfg-colorstone"),
+        huid_per_pc: getVal("cfg-huid"),
+        certification: getVal("cfg-cert"),
+        making_charge: getVal("cfg-making"),
+        cmp_diamond_i1i2: getVal("cmp-i1i2"),
+        cmp_diamond_si: getVal("cmp-si"),
+        cmp_colorstone_rate: getVal("cmp-colorstone"),
+        cmp_huid_per_pc: getVal("cmp-huid"),
+        cmp_certification: getVal("cmp-cert"),
+        cmp_making_charge: getVal("cmp-making")
+    };
+
+    for (var k in payload) {
+        if (isNaN(payload[k]) || payload[k] < 0) {
+            showAlert('<i class="bi bi-exclamation-triangle me-1"></i>Please enter a valid value for all fields.', "warning");
+            return;
+        }
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving\u2026';
+
+    try {
+        var data = await api("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (data.ok) {
+            showAlert('<i class="bi bi-check-circle me-1"></i>' + data.message, "success");
+            await fetchConfig();
+        } else {
+            showAlert('<i class="bi bi-x-circle me-1"></i>' + data.error, "danger");
+        }
+    } catch (e) {
+        showAlert('<i class="bi bi-x-circle me-1"></i>' + e.message, "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-save me-1"></i> Save Both Charts';
+    }
+}
+
+// == Run Pricing ==
+
+async function runUpdate() {
+    var btn = document.getElementById("btn-update");
+    btn.classList.add("running");
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running Pricing\u2026';
+
+    try {
+        var data = await api("/api/update/run", { method: "POST" });
+
+        if (!data.ok) {
+            showAlert('<i class="bi bi-x-circle me-1"></i><b>Error:</b> ' + data.error, "danger");
+            return;
+        }
+
+        if (data.status === "baseline_set") {
+            showAlert('<i class="bi bi-pin-angle me-1"></i>' + data.message, "info");
+        } else if (data.status === "updated") {
+            showAlert(
+                '<i class="bi bi-check-circle-fill me-1"></i><b>Success!</b> ' + data.message + '<br>' +
+                '<small>9KT: ' + fmtDelta(data.delta_9kt) + '/g &nbsp;|&nbsp; ' +
+                '14KT: ' + fmtDelta(data.delta_14kt) + '/g &nbsp;|&nbsp; 18KT: ' + fmtDelta(data.delta_18kt) + '/g &nbsp;|&nbsp; ' +
+                'Output: <b>' + data.output_file + '</b></small>',
+                "success"
+            );
+        }
+
+        await Promise.all([fetchStoredRate(), fetchSheets(), fetchLogs()]);
+        updateDelta();
+    } catch (e) {
+        showAlert('<i class="bi bi-x-circle me-1"></i><b>Error:</b> ' + e.message, "danger");
+    } finally {
+        btn.classList.remove("running");
+        btn.innerHTML = '<i class="bi bi-lightning-charge-fill me-1"></i> Run Pricing';
+    }
+}
+
+async function forceBaseline() {
+    if (!confirm("Set current IBJA rate as baseline WITHOUT changing prices?")) return;
+
+    try {
+        var data = await api("/api/update/force", { method: "POST" });
+        if (data.ok) {
+            showAlert('<i class="bi bi-pin-angle me-1"></i>' + data.message, "info");
+            await Promise.all([fetchStoredRate(), fetchHistory()]);
+            updateDelta();
+        } else {
+            showAlert("Error: " + data.error, "danger");
+        }
+    } catch (e) {
+        showAlert("Error: " + e.message, "danger");
+    }
+}
+
+// == File Upload ==
+
+async function uploadFile() {
+    var input = document.getElementById("file-input");
+    if (!input.files.length) return;
+
+    var file = input.files[0];
+    var formData = new FormData();
+    formData.append("file", file);
+
+    var infoEl = document.getElementById("active-file-info");
+    infoEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading\u2026';
+
+    try {
+        var resp = await fetch("/api/upload", { method: "POST", body: formData });
+        var data = await resp.json();
+
+        if (data.ok) {
+            showAlert('<i class="bi bi-check-circle me-1"></i>' + data.message, "success");
+            await fetchActiveFile();
+            fetchUploads();
+        } else {
+            showAlert('<i class="bi bi-x-circle me-1"></i>' + data.error, "danger");
+            infoEl.textContent = "Upload failed";
+        }
+    } catch (e) {
+        showAlert('<i class="bi bi-x-circle me-1"></i>' + e.message, "danger");
+        infoEl.textContent = "Upload error";
+    }
+
+    input.value = "";
+}
+
+async function fetchActiveFile() {
+    var el = document.getElementById("active-file-info");
+    if (!el) return;
+
+    var data = await api("/api/upload/active");
+    if (!data.ok) return;
+
+    if (data.upload) {
+        el.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1 text-success"></i><b>' + data.upload.original_name + '</b><span class="text-muted ms-1">(' + fmtDate(data.upload.timestamp) + ')</span>';
+    } else {
+        el.innerHTML = '<i class="bi bi-file-earmark me-1"></i>Using default: <b>' + data.source_file + '</b>';
+    }
+}
+
+// == Uploaded Files Tab ==
+
+async function fetchUploads() {
+    var container = document.getElementById("uploads-table");
+    if (!container) return;
+
+    var data = await api("/api/upload/list");
+    if (!data.ok) {
+        container.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        return;
+    }
+
+    if (data.uploads.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-4">No files uploaded yet.</div>';
+        return;
+    }
+
+    var html = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>' +
+        '<th>#</th><th>Filename</th><th>Size</th><th>Uploaded</th></tr></thead><tbody>';
+
+    data.uploads.forEach(function(u, i) {
+        html += '<tr><td>' + (i + 1) + '</td>' +
+            '<td><span class="sheet-name">' + u.filename + '</span></td>' +
+            '<td>' + fmtSize(u.size_kb) + '</td>' +
+            '<td>' + fmtDate(new Date(u.modified * 1000).toISOString()) + '</td>' +
+            '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// == Sheets Table ==
+
+async function fetchSheets() {
+    var container = document.getElementById("sheets-table");
+    var data = await api("/api/sheets");
+    if (!data.ok) {
+        container.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        return;
+    }
+
+    if (data.sheets.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-4">No sheets generated yet. Upload a CSV and click "Run Pricing".</div>';
+        return;
+    }
+
+    var html = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>' +
+        '<th>#</th><th>Filename</th><th>Size</th>' +
+        '<th class="d-none d-md-table-cell">Rate Used</th>' +
+        '<th class="d-none d-md-table-cell">Variants</th>' +
+        '<th>Actions</th></tr></thead><tbody>';
+
+    data.sheets.forEach(function(s, i) {
+        var log = s.log || {};
+        var isLatest = i === 0;
+        var latestBadge = isLatest ? ' <span class="badge bg-success latest-badge">Latest</span>' : '';
+        var rateInfo = log.new_rate_14kt
+            ? '14KT: ' + fmt(log.new_rate_14kt) + '<br>18KT: ' + fmt(log.new_rate_18kt)
+            : '\u2014';
+        var variants = log.variants_updated != null
+            ? log.variants_updated.toLocaleString() + ' / ' + log.products_updated
+            : '\u2014';
+
+        html += '<tr' + (isLatest ? ' class="table-row-latest"' : '') + '>' +
+            '<td>' + (i + 1) + '</td>' +
+            '<td><span class="sheet-name">' + s.filename + '</span>' + latestBadge + '</td>' +
+            '<td>' + fmtSize(s.size_kb) + '</td>' +
+            '<td class="d-none d-md-table-cell" style="font-size:0.85rem">' + rateInfo + '</td>' +
+            '<td class="d-none d-md-table-cell" style="font-size:0.85rem">' + variants + '</td>' +
+            '<td><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="btn btn-sm btn-outline-success me-1" title="Download"><i class="bi bi-download"></i></a></td>' +
+            '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// == Rate History ==
+
+async function fetchHistory() {
+    var container = document.getElementById("history-table");
+    var data = await api("/api/rates/history?limit=50");
+    if (!data.ok) {
+        container.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        return;
+    }
+    if (data.history.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-4">No rate history yet.</div>';
+        return;
+    }
+
+    var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>' +
+        '<th>#</th><th>Timestamp</th><th>9 KT</th><th>14 KT</th><th>18 KT</th>' +
+        '<th class="d-none d-md-table-cell">Fine Gold</th><th>Session</th>' +
+        '<th class="d-none d-md-table-cell">IBJA Date</th></tr></thead><tbody>';
+
+    data.history.forEach(function(r, i) {
+        html += '<tr><td>' + (i + 1) + '</td>' +
+            '<td>' + fmtDate(r.timestamp) + '</td>' +
+            '<td><b>' + fmt(r.rate_9kt) + '</b></td>' +
+            '<td><b>' + fmt(r.rate_14kt) + '</b></td>' +
+            '<td><b>' + fmt(r.rate_18kt) + '</b></td>' +
+            '<td class="d-none d-md-table-cell">' + fmt(r.rate_fine) + '</td>' +
+            '<td><span class="badge ' + (r.session === 'AM' ? 'bg-primary' : 'bg-secondary') + '">' + (r.session || '\u2014') + '</span></td>' +
+            '<td class="d-none d-md-table-cell">' + (r.rate_date || '\u2014') + '</td></tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// == Update Logs ==
+
+async function fetchLogs() {
+    var container = document.getElementById("logs-table");
+    var data = await api("/api/logs?limit=50");
+    if (!data.ok) {
+        container.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        return;
+    }
+    if (data.logs.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-4">No update logs yet.</div>';
+        return;
+    }
+
+    var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>' +
+        '<th>#</th><th>Timestamp</th>' +
+        '<th class="d-none d-md-table-cell">Old 14KT</th><th>New 14KT</th>' +
+        '<th class="d-none d-md-table-cell">Old 18KT</th><th>New 18KT</th>' +
+        '<th>Variants</th><th class="d-none d-md-table-cell">Output</th><th>Status</th></tr></thead><tbody>';
+
+    data.logs.forEach(function(l, i) {
+        var d14 = l.new_rate_14kt - l.old_rate_14kt;
+        var d18 = l.new_rate_18kt - l.old_rate_18kt;
+        html += '<tr><td>' + (i + 1) + '</td>' +
+            '<td>' + fmtDate(l.timestamp) + '</td>' +
+            '<td class="d-none d-md-table-cell">' + fmt(l.old_rate_14kt) + '</td>' +
+            '<td>' + fmt(l.new_rate_14kt) + ' <small class="' + (d14 >= 0 ? 'delta-positive' : 'delta-negative') + '">(' + fmtDelta(d14) + ')</small></td>' +
+            '<td class="d-none d-md-table-cell">' + fmt(l.old_rate_18kt) + '</td>' +
+            '<td>' + fmt(l.new_rate_18kt) + ' <small class="' + (d18 >= 0 ? 'delta-positive' : 'delta-negative') + '">(' + fmtDelta(d18) + ')</small></td>' +
+            '<td>' + (l.variants_updated ? l.variants_updated.toLocaleString() : 0) + ' / ' + l.products_updated + '</td>' +
+            '<td class="d-none d-md-table-cell"><span class="sheet-name">' + l.output_file + '</span></td>' +
+            '<td><span class="badge bg-' + (l.status === 'success' ? 'success' : 'danger') + '">' + l.status + '</span></td></tr>';
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// == Init ==
+
+document.addEventListener("DOMContentLoaded", function() {
+    fetchLiveRates();
+    fetchStoredRate();
+    fetchSheets();
+    fetchHistory();
+    fetchLogs();
+    fetchUploads();
+
+    // Editor-only features
+    if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {
+        fetchConfig();
+        fetchActiveFile();
+    }
+});
