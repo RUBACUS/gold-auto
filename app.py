@@ -16,6 +16,7 @@ from database import (
     get_rate_config, save_rate_config,
     authenticate_user,
     save_uploaded_file, get_active_upload,
+    deactivate_active_upload, get_all_uploads, delete_uploaded_file_record,
 )
 from update_prices import run_update, OUTPUT_DIR, get_source_file
 
@@ -188,7 +189,20 @@ def api_run_update():
         return jsonify({"ok": False, "error": "An update is already in progress."}), 409
 
     try:
+        # Require a freshly uploaded file every time
+        upload = get_active_upload()
+        if not upload:
+            return jsonify({
+                "ok": False,
+                "error": "No file uploaded. Please upload a CSV/XLSX file before running pricing."
+            }), 400
+
         result = run_update()
+
+        # Deactivate the upload only after actual CSV generation (not on baseline-set)
+        if result.get("status") == "updated":
+            deactivate_active_upload()
+
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -252,31 +266,42 @@ def api_upload_file():
 @login_required
 def api_active_upload():
     upload = get_active_upload()
-    source = get_source_file()
     return jsonify({
         "ok": True,
         "upload": upload,
-        "source_file": os.path.basename(source),
     })
 
 
 @app.route("/api/upload/list")
 @login_required
 def api_list_uploads():
-    """List all uploaded source files (date-wise)."""
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    uploads = []
-    for fname in sorted(os.listdir(UPLOAD_DIR), reverse=True):
-        if fname.startswith("~$"):
-            continue
-        fpath = os.path.join(UPLOAD_DIR, fname)
-        stat = os.stat(fpath)
-        uploads.append({
-            "filename": fname,
-            "size_kb": round(stat.st_size / 1024),
-            "modified": os.path.getmtime(fpath),
-        })
+    """List all uploaded source files from the database."""
+    uploads = get_all_uploads()
     return jsonify({"ok": True, "uploads": uploads})
+
+
+@app.route("/api/upload/<filename>/download")
+@login_required
+def api_download_upload(filename):
+    safe = os.path.basename(filename)
+    if safe != filename:
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
+    if os.path.isfile(os.path.join(UPLOAD_DIR, safe)):
+        return send_from_directory(UPLOAD_DIR, safe, as_attachment=True)
+    return jsonify({"ok": False, "error": "File not found"}), 404
+
+
+@app.route("/api/upload/<filename>/delete", methods=["DELETE"])
+@editor_required
+def api_delete_upload(filename):
+    safe = os.path.basename(filename)
+    if safe != filename:
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
+    fpath = os.path.join(UPLOAD_DIR, safe)
+    if os.path.isfile(fpath):
+        os.remove(fpath)
+    delete_uploaded_file_record(safe)
+    return jsonify({"ok": True})
 
 
 # ── API: Sheets ──────────────────────────────────────────

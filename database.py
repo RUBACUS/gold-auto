@@ -398,3 +398,29 @@ def get_active_upload():
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def deactivate_active_upload():
+    """Mark the current active upload as used (consumed by a generation run)."""
+    conn = get_connection()
+    conn.execute("UPDATE uploaded_files SET is_active = 0 WHERE is_active = 1")
+    conn.commit()
+    conn.close()
+
+
+def get_all_uploads():
+    """Return all uploaded files from DB, most recent first."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM uploaded_files ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_uploaded_file_record(filename):
+    """Delete an uploaded file record from the DB by stored filename."""
+    conn = get_connection()
+    conn.execute("DELETE FROM uploaded_files WHERE filename = ?", (filename,))
+    conn.commit()
+    conn.close()

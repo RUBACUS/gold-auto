@@ -2,7 +2,9 @@ import os
 import csv
 import glob
 import math
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 import openpyxl
 
@@ -28,15 +30,21 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "updated_sheets")
 def get_source_file():
     """Return the path to the active source CSV/xlsx file.
 
-    Uses the most recently uploaded file if available,
-    otherwise falls back to the default export.
+    Requires an active (freshly uploaded) file to be present.
+    Raises ValueError if no active upload is found.
     """
     upload = get_active_upload()
     if upload:
         path = os.path.join(UPLOAD_DIR, upload["filename"])
         if os.path.isfile(path):
             return path
-    return DEFAULT_FILE
+        raise ValueError(
+            f"Active upload file not found on disk: {upload['filename']}. "
+            "Please upload the file again."
+        )
+    raise ValueError(
+        "No source file uploaded. Please upload a CSV or XLSX file before running pricing."
+    )
 
 
 # For backward compatibility
@@ -83,9 +91,9 @@ def parse_weight(value):
 
 
 def generate_output_filename(suffix, ext=".xlsx"):
-    """Create a timestamped output filename."""
-    now = datetime.now()
-    name = now.strftime(f"products_%Y%m%d_%H%M_{suffix}{ext}")
+    """Create an IST-timestamped output filename."""
+    now = datetime.now(IST)
+    name = now.strftime(f"products_%d%b%Y_%H%M%S_IST_{suffix}{ext}")
     return os.path.join(OUTPUT_DIR, name)
 
 
@@ -127,9 +135,24 @@ def _is_csv(filepath):
 
 
 def _read_csv_rows(filepath):
-    """Read CSV file and return list of rows (each row is a list of strings)."""
+    """Read CSV file and return list of rows (each row is a list of strings).
+
+    Tries common encodings in order so Shopify exports saved as Windows-1252
+    or Latin-1 are handled without error.
+    """
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            rows = []
+            with open(filepath, "r", encoding=enc, newline="") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    rows.append(row)
+            return rows
+        except UnicodeDecodeError:
+            continue
+    # Last resort: replace undecodable bytes instead of crashing
     rows = []
-    with open(filepath, "r", encoding="utf-8-sig", newline="") as f:
+    with open(filepath, "r", encoding="utf-8", errors="replace", newline="") as f:
         reader = csv.reader(f)
         for row in reader:
             rows.append(row)

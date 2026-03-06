@@ -89,27 +89,27 @@
                 </div>
                 <div class="dash-card-body">
                     <div class="row g-2">
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">GH I1-I2 <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-i1i2" placeholder="39500" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">GH SI <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-si" placeholder="49500" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Colorstone <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-colorstone" placeholder="1500" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">HUID <span class="text-muted">(₹/pc)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-huid" placeholder="100" min="0" step="10">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Certification <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-cert" placeholder="500" min="0" step="50">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Making Charge <span class="text-muted">(₹/g)</span></label>
                             <input type="number" class="form-control config-input" id="cfg-making" placeholder="2500" min="0" step="100">
                         </div>
@@ -126,27 +126,27 @@
                 </div>
                 <div class="dash-card-body">
                     <div class="row g-2">
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">GH I1-I2 <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-i1i2" placeholder="100000" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">GH SI <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-si" placeholder="125000" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Colorstone <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-colorstone" placeholder="1500" min="0" step="100">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">HUID <span class="text-muted">(₹/pc)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-huid" placeholder="100" min="0" step="10">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Certification <span class="text-muted">(₹/ct)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-cert" placeholder="500" min="0" step="50">
                         </div>
-                        <div class="col-6">
+                        <div class="col-12 col-sm-6">
                             <label class="config-label">Making Charge <span class="text-muted">(₹/g)</span></label>
                             <input type="number" class="form-control config-input" id="cmp-making" placeholder="2500" min="0" step="100">
                         </div>
@@ -182,11 +182,11 @@
         <div class="col-12 col-md-6">
             <div class="upload-zone" id="upload-zone">
                 <input type="file" id="file-input" accept=".xlsx,.csv" class="d-none" onchange="uploadFile()">
-                <div class="d-flex align-items-center gap-3 flex-wrap">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
                     <button class="btn btn-outline-primary" onclick="document.getElementById('file-input').click()">
                         <i class="bi bi-cloud-upload me-1"></i> Upload CSV / XLSX
                     </button>
-                    <span class="small text-muted" id="active-file-info">Loading source file…</span>
+                    <span class="small" id="active-file-info" style="word-break:break-all">Loading source file…</span>
                 </div>
             </div>
         </div>

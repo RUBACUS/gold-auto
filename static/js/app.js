@@ -91,11 +91,9 @@ async function fetchLiveRates() {
         : '<span class="badge session-badge" style="background:#7952b3">PM</span>';
 
     card.innerHTML =
-        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(liveRates["9kt"]) + '</span></div>' +
-        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(liveRates["14kt"]) + '</span></div>' +
         '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value">' + fmt(liveRates["18kt"]) + '</span></div>' +
-        '<div class="rate-row"><span class="rate-label">Fine Gold (999)</span><span class="rate-value" style="font-size:1.1rem">' + fmt(liveRates.fine_gold) + '</span></div>' +
-        '<div class="rate-row"><span class="rate-label">750 Purity</span><span class="rate-value" style="font-size:1rem">' + fmt(liveRates.purity_750) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(liveRates["14kt"]) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(liveRates["9kt"]) + '</span></div>' +
         '<div class="mt-2 text-muted" style="font-size:0.8rem">' + sessionBadge + ' &nbsp; Date: ' + (liveRates.date || "\u2014") +
         ' &nbsp;<span class="text-secondary">\u00b7 per gram, excl. GST</span></div>';
 
@@ -116,9 +114,9 @@ async function fetchStoredRate() {
 
     storedRate = data.rate;
     card.innerHTML =
-        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(storedRate.rate_9kt) + '</span></div>' +
-        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(storedRate.rate_14kt) + '</span></div>' +
         '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value">' + fmt(storedRate.rate_18kt) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value">' + fmt(storedRate.rate_14kt) + '</span></div>' +
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value">' + fmt(storedRate.rate_9kt) + '</span></div>' +
         '<div class="mt-2 text-muted" style="font-size:0.8rem"><i class="bi bi-clock me-1"></i>' + fmtDate(storedRate.timestamp) + ' &nbsp; <span class="badge bg-secondary session-badge">' + (storedRate.session || "") + '</span></div>';
 
     updateDelta();
@@ -140,9 +138,9 @@ function updateDelta() {
     var needUpdate = d9 !== 0 || d14 !== 0 || d18 !== 0;
 
     card.innerHTML =
-        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value ' + cls(d9) + '"><i class="bi ' + icon(d9) + '"></i> ' + fmtDelta(d9) + '/g</span></div>' +
-        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value ' + cls(d14) + '"><i class="bi ' + icon(d14) + '"></i> ' + fmtDelta(d14) + '/g</span></div>' +
         '<div class="rate-row"><span class="rate-label">18 KT</span><span class="rate-value ' + cls(d18) + '"><i class="bi ' + icon(d18) + '"></i> ' + fmtDelta(d18) + '/g</span></div>' +
+        '<div class="rate-row"><span class="rate-label">14 KT</span><span class="rate-value ' + cls(d14) + '"><i class="bi ' + icon(d14) + '"></i> ' + fmtDelta(d14) + '/g</span></div>' +
+        '<div class="rate-row"><span class="rate-label">9 KT</span><span class="rate-value ' + cls(d9) + '"><i class="bi ' + icon(d9) + '"></i> ' + fmtDelta(d9) + '/g</span></div>' +
         '<div class="text-center mt-2">' +
         (needUpdate
             ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Update Available</span>'
@@ -241,6 +239,13 @@ async function saveConfig() {
 // == Run Pricing ==
 
 async function runUpdate() {
+    // Verify an active upload exists before proceeding
+    var activeCheck = await api("/api/upload/active");
+    if (!activeCheck.ok || !activeCheck.upload) {
+        showAlert('<i class="bi bi-exclamation-triangle me-1"></i><b>Upload Required:</b> Please upload a CSV/XLSX file before running pricing.', "warning");
+        return;
+    }
+
     var btn = document.getElementById("btn-update");
     btn.classList.add("running");
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running Pricing\u2026';
@@ -258,14 +263,15 @@ async function runUpdate() {
         } else if (data.status === "updated") {
             showAlert(
                 '<i class="bi bi-check-circle-fill me-1"></i><b>Success!</b> ' + data.message + '<br>' +
-                '<small>9KT: ' + fmtDelta(data.delta_9kt) + '/g &nbsp;|&nbsp; ' +
-                '14KT: ' + fmtDelta(data.delta_14kt) + '/g &nbsp;|&nbsp; 18KT: ' + fmtDelta(data.delta_18kt) + '/g &nbsp;|&nbsp; ' +
+                '<small>18KT: ' + fmtDelta(data.delta_18kt) + '/g &nbsp;|&nbsp; ' +
+                '14KT: ' + fmtDelta(data.delta_14kt) + '/g &nbsp;|&nbsp; ' +
+                '9KT: ' + fmtDelta(data.delta_9kt) + '/g &nbsp;|&nbsp; ' +
                 'Output: <b>' + data.output_file + '</b></small>',
                 "success"
             );
         }
 
-        await Promise.all([fetchStoredRate(), fetchSheets(), fetchLogs()]);
+        await Promise.all([fetchStoredRate(), fetchSheets(), fetchLogs(), fetchUploads(), fetchActiveFile()]);
         updateDelta();
     } catch (e) {
         showAlert('<i class="bi bi-x-circle me-1"></i><b>Error:</b> ' + e.message, "danger");
@@ -332,10 +338,14 @@ async function fetchActiveFile() {
     var data = await api("/api/upload/active");
     if (!data.ok) return;
 
+    var btn = document.getElementById("btn-update");
+
     if (data.upload) {
         el.innerHTML = '<i class="bi bi-file-earmark-spreadsheet me-1 text-success"></i><b>' + data.upload.original_name + '</b><span class="text-muted ms-1">(' + fmtDate(data.upload.timestamp) + ')</span>';
+        if (btn) { btn.disabled = false; btn.title = ""; }
     } else {
-        el.innerHTML = '<i class="bi bi-file-earmark me-1"></i>Using default: <b>' + data.source_file + '</b>';
+        el.innerHTML = '<i class="bi bi-exclamation-triangle me-1 text-warning"></i><span class="text-warning">Upload a file before running pricing</span>';
+        if (btn) { btn.disabled = true; btn.title = "Upload a CSV/XLSX file first"; }
     }
 }
 
@@ -357,18 +367,39 @@ async function fetchUploads() {
     }
 
     var html = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr>' +
-        '<th>#</th><th>Filename</th><th>Size</th><th>Uploaded</th></tr></thead><tbody>';
+        '<th>#</th><th>Original Filename</th><th>Status</th><th>Uploaded At</th><th>Actions</th></tr></thead><tbody>';
 
     data.uploads.forEach(function(u, i) {
+        var statusBadge = u.is_active
+            ? '<span class="badge bg-success">Active</span>'
+            : '<span class="badge bg-secondary">Used</span>';
+        var deleteBtn = USER_ROLE === 'editor'
+            ? '<button class="btn btn-sm btn-outline-danger ms-1" title="Delete" onclick="deleteUpload(' + JSON.stringify(u.filename) + ')"><i class="bi bi-trash"></i></button>'
+            : '';
         html += '<tr><td>' + (i + 1) + '</td>' +
-            '<td><span class="sheet-name">' + u.filename + '</span></td>' +
-            '<td>' + fmtSize(u.size_kb) + '</td>' +
-            '<td>' + fmtDate(new Date(u.modified * 1000).toISOString()) + '</td>' +
-            '</tr>';
+            '<td><span class="sheet-name">' + (u.original_name || u.filename) + '</span></td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td>' + fmtDate(u.timestamp) + '</td>' +
+            '<td>' +
+                '<a href="/api/upload/' + encodeURIComponent(u.filename) + '/download" class="btn btn-sm btn-outline-success" title="Download"><i class="bi bi-download"></i></a>' +
+                deleteBtn +
+            '</td></tr>';
     });
 
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+async function deleteUpload(filename) {
+    if (!confirm('Delete uploaded file "' + filename + '"?')) return;
+    var data = await api('/api/upload/' + encodeURIComponent(filename) + '/delete', { method: 'DELETE' });
+    if (data.ok) {
+        showAlert('Uploaded file deleted.', 'success');
+        fetchUploads();
+        fetchActiveFile();
+    } else {
+        showAlert(data.error || 'Delete failed.', 'danger');
+    }
 }
 
 // == Sheets Table ==
@@ -447,17 +478,16 @@ async function fetchHistory() {
     }
 
     var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>' +
-        '<th>#</th><th>Timestamp</th><th>9 KT</th><th>14 KT</th><th>18 KT</th>' +
-        '<th class="d-none d-md-table-cell">Fine Gold</th><th>Session</th>' +
+        '<th>#</th><th>Timestamp</th><th>18 KT</th><th>14 KT</th><th>9 KT</th>' +
+        '<th>Session</th>' +
         '<th class="d-none d-md-table-cell">IBJA Date</th></tr></thead><tbody>';
 
     data.history.forEach(function(r, i) {
         html += '<tr><td>' + (i + 1) + '</td>' +
             '<td>' + fmtDate(r.timestamp) + '</td>' +
-            '<td><b>' + fmt(r.rate_9kt) + '</b></td>' +
-            '<td><b>' + fmt(r.rate_14kt) + '</b></td>' +
             '<td><b>' + fmt(r.rate_18kt) + '</b></td>' +
-            '<td class="d-none d-md-table-cell">' + fmt(r.rate_fine) + '</td>' +
+            '<td><b>' + fmt(r.rate_14kt) + '</b></td>' +
+            '<td><b>' + fmt(r.rate_9kt) + '</b></td>' +
             '<td><span class="badge ' + (r.session === 'AM' ? 'bg-primary' : 'bg-secondary') + '">' + (r.session || '\u2014') + '</span></td>' +
             '<td class="d-none d-md-table-cell">' + (r.rate_date || '\u2014') + '</td></tr>';
     });
