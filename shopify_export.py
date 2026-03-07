@@ -99,9 +99,10 @@ def submit_bulk_export():
                       price
                       compareAtPrice
                       position
-                      option1
-                      option2
-                      option3
+                      selectedOptions {
+                        name
+                        value
+                      }
                     }
                   }
                 }
@@ -239,13 +240,14 @@ def download_and_convert(download_url, output_path):
                 "Tags":                         ", ".join(product.get("tags", [])) if isinstance(product.get("tags"), list) else product.get("tags", ""),
                 "Published":                    "",
                 "Option1 Name":                 "",
-                "Option1 Value":                variant.get("option1", ""),
+                # selectedOptions is a list [{name, value}, ...] — map by position
+                "Option1 Value": (variant.get("selectedOptions") or [{}])[0].get("value", ""),
                 "Option1 Linked To":            "",
                 "Option2 Name":                 "",
-                "Option2 Value":                variant.get("option2", ""),
+                "Option2 Value": (variant.get("selectedOptions") or [{}, {}])[1].get("value", "") if len(variant.get("selectedOptions") or []) > 1 else "",
                 "Option2 Linked To":            "",
                 "Option3 Name":                 "",
-                "Option3 Value":                variant.get("option3", ""),
+                "Option3 Value": (variant.get("selectedOptions") or [{}, {}, {}])[2].get("value", "") if len(variant.get("selectedOptions") or []) > 2 else "",
                 "Option3 Linked To":            "",
                 "Variant SKU":                  variant.get("sku", ""),
                 "Variant Grams":                "",
