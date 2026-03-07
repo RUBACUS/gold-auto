@@ -3,282 +3,262 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TaaraLaxmii – Gold Price Updater</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <title>TaaraLaxmii – Gold Price Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
 
-<!-- Navbar -->
-<nav class="navbar navbar-expand-md px-3 px-md-4 sticky-top">
-    <span class="navbar-brand mb-0 d-flex align-items-center">
-        <i class="bi bi-gem me-2"></i>TaaraLaxmii
-    </span>
-    <span class="d-none d-md-inline text-light-muted small ms-2" id="clock"></span>
-    <div class="ms-auto d-flex align-items-center gap-2">
-        <span class="user-badge">
-            <i class="bi bi-person-circle me-1"></i>
-            <span id="user-display">{{ user.username }}</span>
-            <span class="badge ms-1 {{ 'bg-warning text-dark' if user.role == 'editor' else 'bg-secondary' }}">{{ user.role }}</span>
-        </span>
-        <button class="btn btn-sm btn-outline-light" onclick="doLogout()" title="Sign out">
-            <i class="bi bi-box-arrow-right"></i>
-        </button>
+<!-- Header -->
+<header class="header">
+    <div class="h-left">
+        <div class="logo"></div>
+        <span class="brand">TaaraLaxmii</span>
+        <div class="vr"></div>
+        <span class="h-meta">Gold Price Dashboard</span>
+        <span class="status-pill"><span class="s-dot"></span>LIVE</span>
     </div>
-</nav>
-
-<div class="container-fluid py-3 py-md-4 px-3 px-md-4 main-content">
-
-    <!-- Alert area -->
-    <div id="alert-area"></div>
-
-    <!-- ─── Rate Cards Row ───────────────────────────── -->
-    <div class="row g-3 mb-4">
-        <!-- Live IBJA rate -->
-        <div class="col-12 col-md-4">
-            <div class="dash-card card-live">
-                <div class="dash-card-header">
-                    <span><i class="bi bi-broadcast me-2"></i>Live IBJA Rate</span>
-                    <button class="btn btn-sm btn-icon" onclick="fetchLiveRates()" title="Refresh">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                </div>
-                <div class="dash-card-body" id="live-rate-card">
-                    <div class="text-center text-muted py-3">
-                        <div class="spinner-border spinner-border-sm me-2"></div>Loading…
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Stored (baseline) rate -->
-        <div class="col-12 col-md-4">
-            <div class="dash-card card-stored">
-                <div class="dash-card-header">
-                    <span><i class="bi bi-database me-2"></i>Last Applied Rate</span>
-                </div>
-                <div class="dash-card-body" id="stored-rate-card">
-                    <div class="text-center text-muted py-3">
-                        <div class="spinner-border spinner-border-sm me-2"></div>Loading…
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Delta -->
-        <div class="col-12 col-md-4">
-            <div class="dash-card card-delta">
-                <div class="dash-card-header">
-                    <span><i class="bi bi-arrow-left-right me-2"></i>Rate Delta</span>
-                </div>
-                <div class="dash-card-body" id="delta-card">
-                    <div class="text-center text-muted py-3">Waiting for rates…</div>
-                </div>
-            </div>
-        </div>
+    <div class="user-chip">
+        <span id="clock"></span>
+        <span class="vr"></span>
+        <span id="user-display">{{ user.username }}</span>
+        <span class="role-badge">{{ user.role }}</span>
+        <button class="logout-btn" onclick="doLogout()" title="Sign out">&#8599; Logout</button>
     </div>
+</header>
 
-    <!-- ─── Rate Config (editor only) ───────────────── -->
-    {% if user.role == 'editor' %}
-    <div class="row g-3 mb-4">
-        <!-- Variant Price Chart -->
-        <div class="col-12 col-lg-6">
-            <div class="dash-card card-config">
-                <div class="dash-card-header">
-                    <span><i class="bi bi-tags me-2"></i>Variant Price Chart</span>
-                    <span class="badge bg-primary ms-2">Selling Price</span>
-                </div>
-                <div class="dash-card-body">
-                    <div class="row g-2">
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">GH I1-I2 <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-i1i2" placeholder="39500" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">GH SI <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-si" placeholder="49500" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Colorstone <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-colorstone" placeholder="1500" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">HUID <span class="text-muted">(₹/pc)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-huid" placeholder="100" min="0" step="10">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Certification <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-cert" placeholder="500" min="0" step="50">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Making Charge <span class="text-muted">(₹/g)</span></label>
-                            <input type="number" class="form-control config-input" id="cfg-making" placeholder="2500" min="0" step="100">
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Compare At Price Chart -->
-        <div class="col-12 col-lg-6">
-            <div class="dash-card card-compare">
-                <div class="dash-card-header">
-                    <span><i class="bi bi-tags-fill me-2"></i>Compare At Price Chart</span>
-                    <span class="badge bg-warning text-dark ms-2">Strikethrough</span>
-                </div>
-                <div class="dash-card-body">
-                    <div class="row g-2">
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">GH I1-I2 <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-i1i2" placeholder="100000" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">GH SI <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-si" placeholder="125000" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Colorstone <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-colorstone" placeholder="1500" min="0" step="100">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">HUID <span class="text-muted">(₹/pc)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-huid" placeholder="100" min="0" step="10">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Certification <span class="text-muted">(₹/ct)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-cert" placeholder="500" min="0" step="50">
-                        </div>
-                        <div class="col-12 col-sm-6">
-                            <label class="config-label">Making Charge <span class="text-muted">(₹/g)</span></label>
-                            <input type="number" class="form-control config-input" id="cmp-making" placeholder="2500" min="0" step="100">
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Save button & status -->
-        <div class="col-12">
-            <div class="d-flex align-items-center gap-3 flex-wrap">
-                <button class="btn btn-accent px-4" id="btn-save-config" onclick="saveConfig()">
-                    <i class="bi bi-save me-1"></i> Save Both Charts
-                </button>
-                <span class="small text-muted" id="config-status"></span>
-            </div>
-        </div>
+<!-- Ticker -->
+<div class="ticker">
+    <div class="ticker-track" id="ticker-track">
+        <span class="ticker-item">Loading market data…</span>
     </div>
-    {% endif %}
-
-    <!-- ─── Action Bar + Upload ──────────────────────── -->
-    {% if user.role == 'editor' %}
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-md-6">
-            <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-primary btn-lg action-btn" id="btn-update" onclick="runUpdate()">
-                    <i class="bi bi-lightning-charge-fill me-1"></i> Run Pricing
-                </button>
-                <button class="btn btn-outline-secondary btn-lg action-btn" onclick="forceBaseline()" title="Set current IBJA rate as baseline without changing prices">
-                    <i class="bi bi-pin-angle me-1"></i> Set Baseline
-                </button>
-            </div>
-        </div>
-        <div class="col-12 col-md-6">
-            <div class="upload-zone" id="upload-zone">
-                <input type="file" id="file-input" accept=".xlsx,.csv" class="d-none" onchange="uploadFile()">
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <button class="btn btn-outline-primary" onclick="document.getElementById('file-input').click()">
-                        <i class="bi bi-cloud-upload me-1"></i> Upload CSV / XLSX
-                    </button>
-                    <span class="small" id="active-file-info" style="word-break:break-all">Loading source file…</span>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- ─── Tabs ─────────────────────────────────────── -->
-    <ul class="nav nav-tabs nav-modern" role="tablist">
-        <li class="nav-item">
-            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-sheets">
-                <i class="bi bi-file-earmark-spreadsheet me-1"></i><span class="d-none d-sm-inline">Generated Sheets</span>
-            </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-uploads">
-                <i class="bi bi-cloud-upload me-1"></i><span class="d-none d-sm-inline">Uploaded Files</span>
-            </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history">
-                <i class="bi bi-clock-history me-1"></i><span class="d-none d-sm-inline">Rate History</span>
-            </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-logs">
-                <i class="bi bi-journal-text me-1"></i><span class="d-none d-sm-inline">Update Logs</span>
-            </button>
-        </li>
-    </ul>
-
-    <div class="tab-content tab-content-modern">
-
-        <!-- Sheets tab -->
-        <div class="tab-pane fade show active" id="tab-sheets">
-            <div id="sheets-table">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm me-2"></div>Loading sheets…
-                </div>
-            </div>
-        </div>
-
-        <!-- Uploaded Files tab -->
-        <div class="tab-pane fade" id="tab-uploads">
-            <div id="uploads-table">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm me-2"></div>Loading…
-                </div>
-            </div>
-        </div>
-
-        <!-- Rate History tab -->
-        <div class="tab-pane fade" id="tab-history">
-            <div id="history-table">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm me-2"></div>Loading…
-                </div>
-            </div>
-        </div>
-
-        <!-- Update Logs tab -->
-        <div class="tab-pane fade" id="tab-logs">
-            <div id="logs-table">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm me-2"></div>Loading…
-                </div>
-            </div>
-        </div>
-    </div>
-
 </div>
 
-<!-- Preview Modal -->
-<div class="modal fade" id="previewModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content modal-modern">
-            <div class="modal-header">
-                <h5 class="modal-title" id="previewTitle">Sheet Preview</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<!-- Page Wrap -->
+<div class="page-wrap">
+
+    <!-- Main Column -->
+    <div class="main-col">
+
+        <!-- Alert Area -->
+        <div id="alert-area"></div>
+
+        <!-- Hero Panel -->
+        <div class="hero-panel">
+            <div class="hero-top">
+                <!-- Price Block -->
+                <div class="price-block">
+                    <div class="gold-label">GOLD 999 · 24KT</div>
+                    <div class="price-hero" id="hero-price">—</div>
+                    <div id="hero-change" class="price-change"></div>
+                    <div class="price-ts" id="hero-ts">Fetching live rates…</div>
+                    <div class="ranges" id="hero-ranges"></div>
+                </div>
+                <!-- Mini Chart -->
+                <div class="mini-chart-wrap">
+                    <div class="mc-head">
+                        <span class="mc-label">24h Trend</span>
+                        <span class="mc-badge" id="mc-badge">—</span>
+                    </div>
+                    <canvas id="sparkline" width="280" height="70"></canvas>
+                    <div class="mc-xaxis" id="mc-xaxis"></div>
+                </div>
             </div>
-            <div class="modal-body" id="previewBody">
-                <div class="text-center py-5">
-                    <div class="spinner-border"></div>
+
+            <!-- Hero Tabs -->
+            <div class="hero-tabs">
+                <div class="htab active" data-target="htab-overview">Overview</div>
+                <div class="htab" data-target="htab-history">Rate History</div>
+                <div class="htab" data-target="htab-logs">Update Logs</div>
+                <div class="htab" data-target="htab-diamond-logs">Diamond Logs</div>
+            </div>
+
+            <!-- Overview Tab -->
+            <div class="hero-tab-content active" id="htab-overview">
+                <div class="htab-panel">
+                    <div id="overview-content">
+                        <div class="empty-state">Loading overview…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rate History Tab -->
+            <div class="hero-tab-content" id="htab-history">
+                <div class="htab-panel">
+                    <div id="history-table">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Update Logs Tab -->
+            <div class="hero-tab-content" id="htab-logs">
+                <div class="htab-panel">
+                    <div id="logs-table">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Diamond Logs Tab -->
+            <div class="hero-tab-content" id="htab-diamond-logs">
+                <div class="htab-panel">
+                    <div id="diamond-logs-table">
+                        <div class="empty-state">Loading…</div>
+                    </div>
                 </div>
             </div>
         </div>
+
+        <!-- Rate Strip -->
+        <div class="rate-strip">
+            <div class="rc">
+                <div class="rc-label">Live IBJA Rate (per gram)</div>
+                <div class="rc-val" id="live-18kt">—</div>
+                <div class="kt-row" id="live-karats"></div>
+                <div class="rc-sub" id="live-session"></div>
+            </div>
+            <div class="rc">
+                <div class="rc-label">Last Applied Rate</div>
+                <div class="rc-val" id="stored-18kt">—</div>
+                <div class="kt-row" id="stored-karats"></div>
+                <div class="rc-sub" id="stored-ts"></div>
+            </div>
+            <div class="rc">
+                <div class="rc-label">Rate Delta</div>
+                <div class="rc-val" id="delta-18kt">—</div>
+                <div class="kt-row" id="delta-karats"></div>
+                <div class="rc-sub" id="delta-status"></div>
+            </div>
+        </div>
+
+        {% if user.role == 'editor' %}
+        <!-- Price Chart Table (Variant Config) -->
+        <div class="bottom-layout">
+            <div class="pt">
+                <div class="pt-head">
+                    <span>Variant Price Chart</span>
+                    <span class="badge-sm badge-blue">Selling Price</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-i1i2" placeholder="39500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-si" placeholder="49500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-colorstone" placeholder="1500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-huid" placeholder="100" min="0" step="10"></div></td></tr>
+                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-cert" placeholder="500" min="0" step="50"></div></td></tr>
+                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-making" placeholder="2500" min="0" step="100"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pt">
+                <div class="pt-head">
+                    <span>Compare At Price Chart</span>
+                    <span class="badge-sm badge-purple">Strikethrough</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-i1i2" placeholder="100000" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-si" placeholder="125000" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-colorstone" placeholder="1500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-huid" placeholder="100" min="0" step="10"></div></td></tr>
+                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-cert" placeholder="500" min="0" step="50"></div></td></tr>
+                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-making" placeholder="2500" min="0" step="100"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="action-bar" style="background:var(--white);border:1px solid var(--border);margin-top:18px">
+            <div class="action-section">
+                <button class="btn btn-dark" id="btn-update" onclick="runUpdate()">&#9654; Run Pricing</button>
+                <button class="btn btn-out" onclick="forceBaseline()" title="Set current IBJA rate as baseline without changing prices">&#8857; Set Baseline</button>
+                <button class="btn btn-gold" id="btn-save-config" onclick="saveConfig()">&#10003; Save Charts</button>
+                <span class="action-divider"></span>
+                <span id="config-status" style="font-size:0.72rem;color:var(--text-3)"></span>
+            </div>
+            <div class="action-section">
+                <span class="action-divider"></span>
+                <input type="file" id="file-input" accept=".xlsx,.csv" class="file-input-hidden" onchange="uploadFile()">
+                <button class="btn btn-gblue" onclick="document.getElementById('file-input').click()">&#11014; Upload CSV/XLSX</button>
+                <span id="active-file-info" style="font-size:0.72rem;color:var(--text-2)">Loading source file…</span>
+            </div>
+        </div>
+
+        <!-- Diamond Section -->
+        <div class="diamond-section">
+            <div class="ds-title">
+                <span>&#9670; Diamond Rate Update</span>
+                <span id="diamond-status" style="font-size:0.72rem"></span>
+            </div>
+            <div class="ds-row">
+                <div class="ds-field">
+                    <label>GH I1-I2 (₹/ct)</label>
+                    <input type="number" id="diamond-i1i2" placeholder="e.g. 39500" min="0" step="1">
+                </div>
+                <div class="ds-field">
+                    <label>GH SI (₹/ct)</label>
+                    <input type="number" id="diamond-si" placeholder="e.g. 49500" min="0" step="1">
+                </div>
+            </div>
+            <div class="ds-actions">
+                <button class="btn btn-green btn-sm" id="btn-diamond-update" onclick="runDiamondUpdate()">&#9670; Run Diamond Update</button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tabs Section (Sheets + Uploads) -->
+        <div class="tabs-section" style="margin-top:18px">
+            <div class="tabs-nav">
+                <div class="tab active" data-target="panel-sheets">Generated Sheets</div>
+                <div class="tab" data-target="panel-uploads">Uploaded Files</div>
+            </div>
+            <div class="tabs-body">
+                <div class="tab-panel active" id="panel-sheets">
+                    <div id="sheets-table">
+                        <div class="empty-state">Loading sheets…</div>
+                    </div>
+                </div>
+                <div class="tab-panel" id="panel-uploads">
+                    <div id="uploads-table">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
+
+    <!-- Live Feed Sidebar -->
+    <aside class="live-feed">
+        <div class="lf-header">
+            <span>Live Feed</span>
+            <span class="badge-sm badge-muted" id="lf-count">0</span>
+        </div>
+        <div class="lf-items" id="lf-items">
+            <div class="lf-empty">No activity yet</div>
+        </div>
+    </aside>
+
 </div>
 
 <script>
     const USER_ROLE = "{{ user.role }}";
+    const CSRF_TOKEN = "{{ csrf_token() }}";
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

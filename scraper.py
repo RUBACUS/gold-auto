@@ -97,8 +97,8 @@ def scrape_ibja_rates():
 
     if kt14 is None or kt18 is None or fine_gold is None:
         raise ValueError(
-            f"Failed to extract required rates from IBJA page. "
-            f"Section text: {section[:300]}"
+            "Failed to extract required rates from IBJA page. "
+            "The page structure may have changed."
         )
 
     # Scrape 750 purity from ibjarates.com

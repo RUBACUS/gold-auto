@@ -1,7 +1,31 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Database
 gold_updater.db
+
+# User-uploaded files (never commit)
 updated_sheets/
 uploads/
+
+# Environment / secrets
 .env
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

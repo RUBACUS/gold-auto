@@ -1,7 +1,7 @@
 import os
 import csv
-import glob
 import math
+import logging
 from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -16,13 +16,13 @@ from database import (
     get_latest_diamond_rates,
     save_diamond_rates,
     save_diamond_update_log,
-    get_base_rates,
     get_rate_config,
     get_active_upload,
+    get_upload_file_data,
+    save_generated_file,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_FILE = os.path.join(BASE_DIR, "products_export_1.xlsx")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "updated_sheets")
 
@@ -31,6 +31,8 @@ def get_source_file():
     """Return the path to the active source CSV/xlsx file.
 
     Requires an active (freshly uploaded) file to be present.
+    If the file is not on disk (e.g. ephemeral Railway filesystem), it is
+    restored from the PostgreSQL database automatically.
     Raises ValueError if no active upload is found.
     """
     upload = get_active_upload()
@@ -38,8 +40,16 @@ def get_source_file():
         path = os.path.join(UPLOAD_DIR, upload["filename"])
         if os.path.isfile(path):
             return path
+        # Restore from PostgreSQL (Railway ephemeral filesystem after redeploy)
+        data = get_upload_file_data(upload["filename"])
+        if data:
+            os.makedirs(UPLOAD_DIR, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(data)
+            logging.info("Restored active upload '%s' from database to disk.", upload["filename"])
+            return path
         raise ValueError(
-            f"Active upload file not found on disk: {upload['filename']}. "
+            f"Active upload file not found on disk or in database: {upload['filename']}. "
             "Please upload the file again."
         )
     raise ValueError(
@@ -47,10 +57,50 @@ def get_source_file():
     )
 
 
-# For backward compatibility
-ORIGINAL_FILE = DEFAULT_FILE
+# Expected CSV header names for dynamic column detection
+_EXPECTED_HEADERS = {
+    "handle": "Handle",
+    "opt2_value": "Option2 Value",
+    "opt3_value": "Option3 Value",
+    "variant_price": "Variant Price",
+    "compare_at_price": "Variant Compare At Price",
+}
 
-# Column indices (1-based, matching Shopify export)
+# Metafield header patterns (case-insensitive substring match)
+_METAFIELD_PATTERNS = {
+    "14kt_weight": "14kt",
+    "18kt_weight": "18kt",
+    "9kt_weight": "9kt",
+    "diamond_weight": "diamond",
+    "gemstone_weight": "gemstone",
+}
+
+
+def _detect_csv_columns(header_row):
+    """Detect column indices from CSV header row. Returns dict of name -> 0-based index.
+
+    Falls back to hardcoded positions if headers don't match.
+    """
+    cols = {}
+    header_lower = [h.strip().lower() for h in header_row]
+
+    # Standard Shopify columns
+    for key, expected in _EXPECTED_HEADERS.items():
+        expected_lower = expected.lower()
+        if expected_lower in header_lower:
+            cols[key] = header_lower.index(expected_lower)
+
+    # Weight metafield columns (match by substring in header)
+    for key, pattern in _METAFIELD_PATTERNS.items():
+        for i, h in enumerate(header_lower):
+            if pattern in h and "weight" in h:
+                cols[key] = i
+                break
+
+    return cols
+
+
+# Fallback column indices (1-based, matching Shopify export) for XLSX
 COL_HANDLE = 1
 COL_OPT2_VALUE = 13       # Gold Quality  e.g. "14KT-Yellow"
 COL_OPT3_VALUE = 16       # Diamond Quality e.g. "GH I1-I2", "GH SI"
@@ -232,8 +282,25 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
         if len(rows) < 2:
             raise ValueError("CSV file has no data rows")
 
-        # CSV is 0-indexed; column constants are 1-based
-        C = lambda col: col - 1  # converter
+        # Detect columns from header row (fall back to hardcoded positions)
+        detected = _detect_csv_columns(rows[0])
+
+        c_handle = detected.get("handle", COL_HANDLE - 1)
+        c_opt2 = detected.get("opt2_value", COL_OPT2_VALUE - 1)
+        c_opt3 = detected.get("opt3_value", COL_OPT3_VALUE - 1)
+        c_price = detected.get("variant_price", COL_VARIANT_PRICE - 1)
+        c_cmp = detected.get("compare_at_price", COL_COMPARE_AT_PRICE - 1)
+        c_14wt = detected.get("14kt_weight", COL_14KT_WEIGHT - 1)
+        c_18wt = detected.get("18kt_weight", COL_18KT_WEIGHT - 1)
+        c_9wt = detected.get("9kt_weight", COL_9KT_WEIGHT - 1)
+        c_diam = detected.get("diamond_weight", COL_DIAMOND_WEIGHT - 1)
+        c_gem = detected.get("gemstone_weight", COL_GEMSTONE_WEIGHT - 1)
+
+        max_col = max(c_handle, c_opt2, c_opt3, c_price, c_cmp,
+                      c_14wt, c_18wt, c_9wt, c_diam, c_gem)
+
+        if detected:
+            logging.info(f"CSV columns detected from headers: {detected}")
 
         # Pass 1 – build weight maps
         product_weights = {}
@@ -243,25 +310,25 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
         for ri in range(1, len(rows)):
             row = rows[ri]
             # Pad row if short
-            while len(row) < max(COL_GEMSTONE_WEIGHT, COL_COMPARE_AT_PRICE) + 1:
+            while len(row) < max_col + 1:
                 row.append("")
 
-            handle = row[C(COL_HANDLE)].strip()
+            handle = row[c_handle].strip()
             if not handle:
                 continue
 
             if handle not in product_weights:
-                w9 = parse_weight(row[C(COL_9KT_WEIGHT)])
-                w14 = parse_weight(row[C(COL_14KT_WEIGHT)])
-                w18 = parse_weight(row[C(COL_18KT_WEIGHT)])
+                w9 = parse_weight(row[c_9wt])
+                w14 = parse_weight(row[c_14wt])
+                w18 = parse_weight(row[c_18wt])
                 if w9 is not None or w14 is not None or w18 is not None:
                     product_weights[handle] = {"9KT": w9, "14KT": w14, "18KT": w18}
             if handle not in product_diamond_weights:
-                diam_wt = parse_weight(row[C(COL_DIAMOND_WEIGHT)])
+                diam_wt = parse_weight(row[c_diam])
                 if diam_wt is not None:
                     product_diamond_weights[handle] = diam_wt
             if handle not in product_gemstone_weights:
-                gem_wt_val = parse_weight(row[C(COL_GEMSTONE_WEIGHT)])
+                gem_wt_val = parse_weight(row[c_gem])
                 if gem_wt_val is not None:
                     product_gemstone_weights[handle] = gem_wt_val
 
@@ -272,11 +339,11 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
 
         for ri in range(1, len(rows)):
             row = rows[ri]
-            handle = row[C(COL_HANDLE)].strip()
+            handle = row[c_handle].strip()
             if handle:
                 current_handle = handle
 
-            opt2 = row[C(COL_OPT2_VALUE)].strip()
+            opt2 = row[c_opt2].strip()
             if not opt2:
                 continue
 
@@ -295,7 +362,7 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
             gold_rate = rate_9 if kt_str == "9KT" else rate_14 if kt_str == "14KT" else rate_18
 
             diamond_wt = product_diamond_weights.get(current_handle, 0) or 0
-            quality = _classify_diamond_quality(row[C(COL_OPT3_VALUE)])
+            quality = _classify_diamond_quality(row[c_opt3])
             gem_wt = product_gemstone_weights.get(current_handle, 0) or 0
 
             # Variant Price
@@ -308,8 +375,8 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
                 gold_wt, gold_rate, diamond_wt, quality,
                 cmp_diamond_rates, cmp_making, cmp_huid, cmp_cert, cmp_gem, gem_wt)
 
-            row[C(COL_VARIANT_PRICE)] = str(new_price)
-            row[C(COL_COMPARE_AT_PRICE)] = str(cmp_price)
+            row[c_price] = str(new_price)
+            row[c_cmp] = str(cmp_price)
             variants_updated += 1
             products_touched.add(current_handle)
 
@@ -317,6 +384,10 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
         output_path = generate_output_filename(suffix, ext=out_ext)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         _write_csv_rows(output_path, rows)
+
+        # Persist to PostgreSQL so the file survives Railway redeploys
+        with open(output_path, "rb") as _f:
+            save_generated_file(os.path.basename(output_path), _f.read())
 
     else:
         # ── XLSX path (original logic) ──
@@ -404,6 +475,10 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
                 writer.writerow(["" if v is None else v for v in row])
         wb.close()
 
+        # Persist to PostgreSQL so the file survives Railway redeploys
+        with open(output_path, "rb") as _f:
+            save_generated_file(os.path.basename(output_path), _f.read())
+
     return output_path, variants_updated, len(products_touched)
 
 
@@ -450,6 +525,8 @@ def run_update():
                  "14kt": int(stored["rate_14kt"]),
                  "18kt": int(stored["rate_18kt"])}
 
+    # Always proceed with CSV generation even if rates are identical
+
     # 3. Load rate config (all editable fields)
     rate_cfg = get_rate_config()
 
@@ -475,18 +552,27 @@ def run_update():
         products_updated,
     )
 
+    d14 = new_rates["14kt"] - old_rates["14kt"]
+    d18 = new_rates["18kt"] - old_rates["18kt"]
+    d9  = new_rates.get("9kt", 0) - old_rates.get("9kt", 0)
+    msg = (
+        f"Prices re-exported with current rates (no rate change) for {variants_updated} variants across {products_updated} products."
+        if d14 == 0 and d18 == 0 and d9 == 0
+        else f"Prices updated for {variants_updated} variants across {products_updated} products."
+    )
+
     return {
         "status": "updated",
-        "message": f"Prices updated for {variants_updated} variants across {products_updated} products.",
+        "message": msg,
         "input_file": os.path.basename(source),
         "output_file": os.path.basename(output_path),
         "variants_updated": variants_updated,
         "products_updated": products_updated,
         "old_rates": old_rates,
         "new_rates": new_rates,
-        "delta_14kt": new_rates["14kt"] - old_rates["14kt"],
-        "delta_18kt": new_rates["18kt"] - old_rates["18kt"],
-        "delta_9kt": new_rates.get("9kt", 0) - old_rates.get("9kt", 0),
+        "delta_14kt": d14,
+        "delta_18kt": d18,
+        "delta_9kt": d9,
     }
 
 
