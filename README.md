@@ -1,343 +1,488 @@
-# TaaraLaxmii – Gold Price Updater
+﻿# TaaraLaxmii — Gold Price Updater & Full Automation System
 
-An automated tool that scrapes live gold rates from **IBJA (India Bullion and Jewellers Association)** and **ibjarates.com**, recalculates every jewelry variant price using a full component-wise formula, and generates an updated CSV/XLSX ready to import into Shopify — complete with both **Variant Price** and **Compare At Price**.
+An end-to-end automated pricing system for a Shopify jewellery store. Every day at **12:00 PM IST** and **5:00 PM IST**, the system automatically scrapes live gold rates from IBJA, exports the complete product catalog directly from Shopify via GraphQL, recalculates every variant price using a full component-wise formula, pushes the updated prices back to Shopify, and sends a Telegram confirmation — with **zero manual steps**.
 
-Features a **web dashboard** with role-based login, dual editable price charts, CSV/XLSX upload, and full rate & update history tracking.
+> **Store:** TaaraLaxmii — `taara-laxmii.myshopify.com`
+> **Scale:** ~939 products, ~55,000+ variant rows per run
+> **Deployed on:** Railway (Flask web app + two cron services + PostgreSQL)
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [How It Works](#how-it-works)
-- [Architecture Diagram](#architecture-diagram)
-- [Data Flow Diagram](#data-flow-diagram)
-- [Folder Structure](#folder-structure)
-- [File-by-File Explanation](#file-by-file-explanation)
-- [The Price Formula](#the-price-formula)
-- [9KT Rate Calculation](#9kt-rate-calculation)
-- [Excel/CSV Sheet Structure](#excelcsv-sheet-structure)
-- [Database Schema](#database-schema)
-- [REST API Reference](#rest-api-reference)
-- [Web Dashboard Guide](#web-dashboard-guide)
-- [Installation](#installation)
-- [How to Run](#how-to-run)
-- [First-Time Setup](#first-time-setup)
-- [Day-to-Day Usage](#day-to-day-usage)
-- [What Gets Updated](#what-gets-updated)
-- [Troubleshooting](#troubleshooting)
-- [Tech Stack](#tech-stack)
+1. [Project Overview](#1-project-overview)
+2. [Architecture](#2-architecture)
+3. [Full Automation Pipeline](#3-full-automation-pipeline)
+4. [Flask Web App](#4-flask-web-app)
+5. [Price Formula](#5-price-formula)
+6. [9KT Rate Calculation](#6-9kt-rate-calculation)
+7. [Shopify Metafield Mapping](#7-shopify-metafield-mapping)
+8. [CSV Column Structure](#8-csv-column-structure)
+9. [Database Schema](#9-database-schema)
+10. [REST API Reference](#10-rest-api-reference)
+11. [File-by-File Explanation](#11-file-by-file-explanation)
+12. [Folder Structure](#12-folder-structure)
+13. [Web Dashboard Guide](#13-web-dashboard-guide)
+14. [Tech Stack](#14-tech-stack)
+15. [Railway Deployment](#15-railway-deployment)
+16. [Environment Variables](#16-environment-variables)
+17. [Local Development Setup](#17-local-development-setup)
+18. [Security Notes](#18-security-notes)
+19. [Troubleshooting](#19-troubleshooting)
 
 ---
 
-## Overview
+## 1. Project Overview
 
 | Aspect | Detail |
 |---|---|
-| **Purpose** | Recalculate gold + diamond jewelry prices for Shopify based on live IBJA gold rates |
+| **Purpose** | Fully automated gold + diamond jewellery price updates for Shopify |
 | **Gold Purities** | 9KT, 14KT, 18KT |
-| **Pricing Columns** | Variant Price (col 24) + Compare At Price (col 25) |
-| **Data Sources** | [ibja.co](https://ibja.co/) (14KT, 18KT, Fine Gold 999) + [ibjarates.com](https://ibjarates.com/) (750 purity) |
+| **Price Columns** | Variant Price (col 24) + Compare At Price (col 25) |
+| **Data Sources** | ibja.co (14KT, 18KT, Fine Gold 999) + ibjarates.com (750 purity) |
+| **Shopify Integration** | GraphQL Bulk Operations API (export) + `productVariantsBulkUpdate` (push) |
+| **Notifications** | Telegram bot sends success/failure alerts after every run |
+| **Database** | PostgreSQL (Railway) — persists across redeploys |
 | **File Formats** | CSV and XLSX (input and output) |
-| **Authentication** | Session-based login with admin/editor and viewer roles |
-| **Products** | ~939 products, ~55,098 variant rows per run |
+| **Authentication** | Session-based login with editor / viewer roles |
+
+### Why This Architecture Exists
+
+| Old Approach | Problem | Current Approach |
+|---|---|---|
+| Playwright clicks Shopify UI to export | Breaks when Shopify updates their UI | Shopify GraphQL Bulk Operations API |
+| Gmail IMAP -> wait for ZIP email | 5-20 min delay, unreliable | Direct download URL from API, ready in 3-7 min |
+| REST API call per variant (55,000+ calls) | 7+ hours at 2 calls/sec | GraphQL per product (~939 calls) |
+| SQLite on Railway ephemeral disk | Data wiped on every redeploy | Railway PostgreSQL (persistent) |
+| Playwright RAM usage on Railway | OOM crash on 512MB free tier | No browser automation at all |
 
 ---
 
-## How It Works
+## 2. Architecture
+
+### High-Level System Architecture
 
 ```
-1. User logs in to the web dashboard
-2. Clicks "Run Pricing"
-3. System scrapes live gold rates from ibja.co + ibjarates.com
-4. Calculates 9KT rate: round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
-5. For each variant (9KT/14KT/18KT):
-   a. Reads gold weight, diamond weight, gemstone weight from sheet
-   b. Computes Variant Price (standard diamond rates)
-   c. Computes Compare At Price (higher diamond rates)
-6. Writes updated CSV/XLSX to updated_sheets/ folder
-7. User downloads and imports into Shopify
++---------------------------------------------------------------------+
+|                         RAILWAY CLOUD                               |
+|                                                                     |
+|  +---------------------+   +------------------+  +--------------+  |
+|  |  Service 1          |   |  Service 2        |  |  Service 3   |  |
+|  |  flask-app          |   |  automation-cron  |  |  nightly-sync|  |
+|  |  (always running)   |   |  (12PM + 5PM IST) |  |  (2AM IST)   |  |
+|  |                     |   |                   |  |              |  |
+|  |  app.py             |   |  automation.py    |  | nightly_sync |  |
+|  |  Gunicorn server    |   |  -> shopify_export|  |  .py         |  |
+|  |  PostgreSQL client  |   |  -> shopify_push  |  |              |  |
+|  +----------+----------+   +--------+----------+  +------+-------+  |
+|             |                       |                     |          |
+|             +----------------+------+-----------+---------+          |
+|                              |                                       |
+|                     +--------v--------+                              |
+|                     |  PostgreSQL DB  |                              |
+|                     |  (persistent)   |                              |
+|                     +-----------------+                              |
++---------------------------------------------------------------------+
+          |                          |                    |
+          v                          v                    v
+   +-------------+         +------------------+   +--------------+
+   |  ibja.co    |         |  Shopify GraphQL |   |  Telegram    |
+   |  ibjarates  |         |  Admin API       |   |  Bot API     |
+   |  .com       |         |  (export + push) |   |              |
+   +-------------+         +------------------+   +--------------+
 ```
 
-Key difference from older versions: this is a **full recalculation** — every variant price is computed from scratch using the formula, not as a delta from previous rates.
-
----
-
-## Architecture Diagram
+### Component Interaction Diagram
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│  ibja.co    │      │  ibjarates.com   │      │  Browser (UI)   │
-│ (14KT,18KT │◄─────│  (750 purity)    │      │  Bootstrap 5    │
-│  Fine Gold) │      └──────────────────┘      └────────┬────────┘
-└──────┬──────┘                                         │
-       │                                                │ HTTP
-       ▼                                                ▼
-┌──────────────────────────────────────────────────────────────┐
-│                      Flask App (app.py)                      │
-│                                                              │
-│  /login              → Login page                            │
-│  /api/auth/*         → Auth endpoints                        │
-│  /api/rates/*        → Live + stored rates                   │
-│  /api/config         → Editable rate charts (12 fields)      │
-│  /api/update/run     → Run Pricing (full recalculation)      │
-│  /api/update/force   → Set Baseline                          │
-│  /api/upload         → Upload CSV/XLSX source file           │
-│  /api/upload/list    → List all uploaded files               │
-│  /api/sheets         → List generated output files           │
-│  /api/sheets/*/dl    → Download output file                  │
-│  /api/logs           → Update logs                           │
-│  /api/diamond/logs   → Diamond update logs                   │
-│                                                              │
-├──────────┬───────────────┬────────────────┬──────────────────┤
-│scraper.py│ update_prices │  database.py   │                  │
-│          │    .py        │                │                  │
-└──────────┴───────────────┴────────────────┴──────────────────┘
-       │            │               │
-       ▼            ▼               ▼
-   Web Scrape   CSV/XLSX       SQLite DB
-   (requests)   (openpyxl/     (gold_updater.db)
-                 csv module)
-```
-
----
-
-## Data Flow Diagram
-
-```
- ibja.co ──────┐
-               ▼
-         ┌───────────┐     ┌──────────────┐
-         │ scraper.py │────►│  9KT Formula │
-         │            │     │  (calc from  │
-         │            │     │  Fine Gold,  │
-         └───────────┘     │  18KT, 750)  │
-               ▲            └──────┬───────┘
- ibjarates.com─┘                   │
-                                   ▼
- ┌──────────────┐         ┌──────────────────┐
- │ Uploaded CSV │────────►│ update_prices.py  │
- │ or default   │         │                  │
- │ XLSX export  │         │ For each variant: │
- └──────────────┘         │ • Variant Price   │
-                          │ • Compare At Price│
-       ┌─────────┐       └────────┬─────────┘
-       │ rate_    │                │
-       │ config   │◄───── rates + │
-       │ (12 flds)│       config   │
-       └─────────┘                ▼
-                          ┌──────────────────┐
-                          │  Output CSV/XLSX  │
-                          │  in updated_sheets│
-                          └──────────────────┘
+automation.py (Main Orchestrator)
+|
++-- stage1_wait_for_rates()
+|     +-- GET /api/rates/current --> Flask app --> scraper.py --> ibja.co
+|                                                             --> ibjarates.com
+|
++-- stage2_fetch_shopify_csv()
+|     +-- shopify_export.fetch_fresh_shopify_csv()
+|           +-- bulkOperationRunQuery mutation --> Shopify GraphQL API
+|           +-- poll currentBulkOperation (every 10s)
+|           +-- download .jsonl -> parse -> convert to CSV
+|
++-- stage3_run_pricing()
+|     +-- POST /api/auth/login --> Flask app
+|     +-- POST /api/upload     --> Flask app --> database.py (saves to PostgreSQL)
+|     +-- POST /api/update/run --> Flask app --> update_prices.py (price formula)
+|     +-- GET  /api/sheets/*/download --> Flask app
+|
++-- stage4_push_prices()
+|     +-- shopify_push.push_prices()
+|           +-- productVariantsBulkUpdate mutation (x939 calls) --> Shopify
+|
++-- stage5_notify()
+      +-- Telegram Bot API --> Your phone
 ```
 
 ---
 
-## Folder Structure
+## 3. Full Automation Pipeline
+
+The automation runs **twice daily** (12PM IST + 5PM IST) and nightly (2AM IST). Each run follows 5 stages.
+
+> **Note on weekends and public holidays:** IBJA does not publish rates on Saturdays, Sundays, or Indian public holidays. On those days, Stage 1 will wait for up to 2 hours, then send a Telegram alert and exit cleanly. This is expected behaviour — no pricing run happens on non-trading days.
+
+### Pipeline Flow (12PM / 5PM Runs)
 
 ```
-gold auto/
-├── app.py                  # Flask web server (20 routes)
-├── scraper.py              # IBJA + ibjarates.com scraper + 9KT formula
-├── database.py             # SQLite DB layer (8 tables)
-├── update_prices.py        # Price recalculation engine (CSV + XLSX)
-├── requirements.txt        # Python dependencies
-├── gold_updater.db         # SQLite database (auto-created)
-├── products_export_1.xlsx  # Default Shopify product export (fallback)
-├── static/
-│   ├── css/
-│   │   └── style.css       # Dashboard styling
-│   └── js/
-│       └── app.js          # Dashboard logic (fetch, config, upload)
-├── templates/
-│   ├── index.html          # Main dashboard (logged-in view)
-│   └── login.html          # Login page
-├── uploads/                # Uploaded CSV/XLSX source files
-└── updated_sheets/         # Generated output files (date-stamped)
+Railway Cron triggers automation.py
+              |
+              v
++------------------------------------------------+
+| STAGE 1 -- Wait for Fresh IBJA Rates           |
+|                                                |
+| * Logs in to Flask app                         |
+| * Calls GET /api/rates/current every 5 min     |
+| * Checks: rate_date == today AND session==AM/PM|
+| * Validates values against sanity ranges:      |
+|   14KT: Rs.5,000-Rs.25,000                     |
+|   18KT: Rs.7,000-Rs.35,000                     |
+|    9KT: Rs.3,000-Rs.15,000                     |
+| * If outside range -> ABORT (prevents corrupt) |
+| * Times out after 2 hours -> Telegram alert    |
+| * On weekends/holidays: waits full 2 hrs then  |
+|   exits cleanly. No action needed from you.    |
++------------------------------------------------+
+              |
+              v
++------------------------------------------------+
+| STAGE 2 -- Fetch Fresh Product CSV from Shopify|
+|                                                |
+| * Submits GraphQL bulkOperationRunQuery        |
+| * Polls currentBulkOperation every 10 seconds  |
+| * Takes 3-7 minutes to complete                |
+| * Downloads .jsonl file from Shopify CDN       |
+| * Parses JSONL:                                |
+|   - Lines without __parentId -> products       |
+|   - Lines with namespace+key -> metafields     |
+|   - All other lines with __parentId -> variants|
+| * Builds 84-column CSV                         |
+| * Validates row count >= 1,000                 |
+| * Deletes raw .jsonl file                      |
+| Typical time: 3-7 minutes                      |
++------------------------------------------------+
+              |
+              v
++------------------------------------------------+
+| STAGE 3 -- Upload CSV + Run Pricing via Flask  |
+|                                                |
+| * Health checks Flask app                      |
+| * Authenticates (POST /api/auth/login)         |
+| * Extracts CSRF token from page HTML           |
+| * Uploads fresh CSV (POST /api/upload)         |
+| * Triggers pricing (POST /api/update/run)      |
+|   -> scraper.py scrapes live IBJA rates        |
+|   -> update_prices.py recalculates all prices  |
+|   -> output CSV saved in updated_sheets/       |
+| * Downloads the output CSV                     |
+| Typical time: 1-2 minutes                      |
++------------------------------------------------+
+              |
+              v
++------------------------------------------------+
+| STAGE 4 -- Push Prices to Shopify via GraphQL  |
+|                                                |
+| * Reads output CSV, groups variants by Product |
+| * For each product (~939 total):               |
+|   -> sends productVariantsBulkUpdate mutation  |
+|   -> 0.2s minimum delay between calls          |
+|   -> each call takes 1-3s (Shopify processing) |
+|   -> retry up to 3 times on failure            |
+| * Collects all failures without stopping       |
+| Typical time: 15-25 minutes for all 939        |
+| (actual observed: ~21 minutes on 07 Mar 2026)  |
++------------------------------------------------+
+              |
+              v
++------------------------------------------------+
+| STAGE 5 -- Telegram Notification               |
+|                                                |
+| Sends message with:                            |
+| * IST timestamp + session (AM/PM)              |
+| * All three applied gold rates                 |
+| * Source row count, products + variants updated|
+| * Push success count, failed product count     |
+| * Total duration                               |
+| * List of any failed product IDs               |
++------------------------------------------------+
+```
+
+**Total expected duration per run: 20–35 minutes.** This is normal. The push stage (Stage 4) dominates the time because each GraphQL mutation takes 1–3 seconds on Shopify's side per product, independent of the 0.2s sleep between calls.
+
+### Nightly Sync Flow (2AM IST)
+
+```
+Railway Cron triggers nightly_sync.py
+              |
+              v
++------------------------------------------------+
+| Fetch fresh product catalog from Shopify       |
+| (full export -- same as Stage 2 above)         |
++------------------------------------------------+
+              |
+              v
++------------------------------------------------+
+| Compare new row count vs most recent sheet     |
+|                                                |
+| If new_count > old_count:                      |
+|   * Upload new CSV to Flask app as active src  |
+|   * Send Telegram: "N new products detected"  |
+|                                                |
+| Else:                                          |
+|   * Log quietly, no Telegram message           |
++------------------------------------------------+
+```
+
+### Error Handling
+
+| Stage | Failure | What Happens |
+|---|---|---|
+| 1 | IBJA website down | Retry every 5 min for 2 hours -> Telegram + clean exit |
+| 1 | Weekend / public holiday (no rates) | Waits 2 hours -> Telegram alert -> clean exit. Normal behaviour. |
+| 1 | Rate values outside sanity range | Hard abort immediately — bad rates would corrupt 55K prices |
+| 1 | Flask app unreachable | Retries, then Telegram alert + exit |
+| 2 | Shopify API 429 (rate limit) | Reads `Retry-After` header, waits that exact duration |
+| 2 | Bulk job fails | Telegram alert + exit |
+| 2 | Export times out (>15 min) | Telegram alert + exit |
+| 2 | CSV has <1,000 rows | Treated as corrupt export — Telegram + exit |
+| 3 | Flask app down at pricing time | Health check fails -> Telegram + exit |
+| 3 | Login fails | Telegram with HTTP status + exit |
+| 3 | Pricing run returns error | Telegram with error text + exit |
+| 4 | GraphQL 429 mid-push | Waits `Retry-After`, continues |
+| 4 | Individual product update fails | Logs it, continues with next product |
+| 4 | >5% of products fail | Telegram reports as critical failure |
+| Any | Unexpected Python exception | Caught by outer try/except -> Telegram + exit |
+
+### Telegram Success Message Example
+
+```
+TaaraLaxmii Pricing Updated
+---------------------------------
+07 Mar 2026, 12:04 PM IST
+Session: AM
+
+IBJA Rates Applied
+  18KT: Rs.12,912/g
+  14KT: Rs.10,537/g
+   9KT: Rs.6,934/g
+
+Update Stats
+  Source rows:      55,098
+  Products updated: 939
+  Variants updated: 55,098
+  Push success:     939 products
+  Push failed:      0 products
+
+Duration: 22m 57s
+
+All products updated successfully.
 ```
 
 ---
 
-## File-by-File Explanation
+## 4. Flask Web App
 
-### `scraper.py`
+The Flask web app serves two purposes: a **manual dashboard** for the operator and an **internal API** that the automation scripts call programmatically.
 
-Scrapes gold rates from two sources:
+### Routes Overview
 
-1. **[ibja.co](https://ibja.co/)** — Retail selling rates for Fine Gold 999, 22KT, 20KT, 18KT, 14KT, plus session (AM/PM) and date.
-2. **[ibjarates.com](https://ibjarates.com/)** — 750 purity gold rate.
-
-**9KT derivation:**
 ```
-9KT = round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
+GET  /              -> Main dashboard (requires login)
+GET  /login         -> Login page
+
+POST /api/auth/login    -> Authenticate, start session
+POST /api/auth/logout   -> Destroy session
+GET  /api/auth/me       -> Current session info
+
+GET  /api/rates/current -> Live-scrape IBJA rates (calls scraper.py)
+GET  /api/rates/stored  -> Last applied baseline
+GET  /api/rates/history -> Paginated rate history
+
+GET  /api/config        -> All 12 editable rate fields
+POST /api/config        -> Save rate chart changes (editor only)
+
+POST /api/update/run    -> Run full pricing recalculation (editor only)
+POST /api/update/force  -> Set current rate as baseline (editor only)
+
+POST /api/upload        -> Upload source CSV/XLSX (editor only)
+GET  /api/upload/active -> Active source file info
+GET  /api/upload/list   -> All uploaded source files
+
+GET  /api/sheets                    -> List generated output files
+GET  /api/sheets/<file>/download    -> Download output file
+DELETE /api/sheets/<file>/delete    -> Delete output file (editor only)
+
+GET  /api/logs          -> Pricing update history
+GET  /api/diamond/logs  -> Diamond update history
 ```
 
-Returns a dictionary with all rates including `9kt` and `purity_750`.
+### Security Features
 
-### `database.py`
+- **CSRF protection** on all POST/PUT/DELETE routes (token in session + `X-CSRF-Token` header)
+- **Rate limiting** on `/api/auth/login` — max 5 attempts per 5 minutes per IP
+- **File content validation** — rejects binary files renamed to `.csv`
+- **Security headers** on all responses: `X-Frame-Options`, `X-Content-Type-Options`, `CSP`, `Referrer-Policy`
+- **Role-based access** — viewer role cannot trigger any writes
+- **Session cookies** — `HttpOnly`, `SameSite=Lax`, `Secure` in production (HTTPS only)
+- **Concurrent update lock** — threading lock prevents two simultaneous pricing runs
 
-Manages SQLite database with **8 tables**:
+> **Important:** Session cookies have the `Secure` flag set, which means they only transmit over HTTPS. Testing locally over `http://localhost` will show 401 errors after login — this is expected. Always test automation scripts against the Railway HTTPS URL, not localhost.
 
-| Table | Purpose |
-|---|---|
-| `rate_history` | Every scraped IBJA rate (timestamped) |
-| `update_log` | Every pricing run result |
-| `diamond_rate_history` | Diamond rate change history |
-| `diamond_update_log` | Diamond pricing run results |
-| `base_rates` | Stored baseline rates |
-| `rate_config` | 12 editable fields (6 standard + 6 compare-at) |
-| `users` | Login credentials with roles |
-| `uploaded_files` | Uploaded source file tracking |
+### Roles
 
-Also handles:
-- User authentication with `werkzeug.security` password hashing
-- Default user seeding on first run
-
-### `update_prices.py`
-
-The pricing engine. Key functions:
-
-- **`update_excel_prices()`** — Reads source CSV/XLSX, recalculates every 9KT/14KT/18KT variant using the full formula, writes **both** Variant Price (col 24) and Compare At Price (col 25).
-- **`run_update()`** — Orchestrates: scrape rates → recalculate → save output → persist to DB.
-- **`_compute_variant_price()`** — Helper that applies the formula for one variant.
-- **`ceil_safe(x)`** — `math.ceil(round(x, 6))` to avoid floating-point ceiling errors.
-
-Supports both CSV and XLSX input/output (format matches the source file).
-
-### `app.py`
-
-Flask web server with **20 routes**, role-based access control, file upload, and concurrent-update protection via threading lock.
-
-Two roles:
-- **editor** — Can run pricing, set baseline, upload files, edit config
-- **viewer** — Read-only access to rates, sheets, logs
-
-### `templates/index.html`
-
-Main dashboard with:
-- Navbar with logged-in user badge + role indicator
-- 3 rate cards: Live IBJA Rates (with 750 purity + 9KT breakdown), Last Applied Rates, Rate Delta
-- 2 side-by-side config cards: **Variant Price Chart** (blue, 6 fields) and **Compare At Price Chart** (orange, 6 fields)
-- Action bar: Run Pricing, Set Baseline, Upload CSV/XLSX
-- 4 tabs: Generated Sheets, Uploaded Files, Rate History, Update Logs
-
-### `templates/login.html`
-
-Gold-themed gradient login page with Bootstrap 5. Redirects to dashboard on success.
-
-### `static/js/app.js`
-
-Frontend logic:
-- Dual config fetch/save (12 fields across both charts)
-- Live rates display with 9KT formula explanation
-- File upload with progress feedback
-- Sheet listing, download, and "Latest" tag
-- Uploaded files listing
-
-### `static/css/style.css`
-
-Custom styling including:
-- `.card-config` — Blue gradient header for Variant Price Chart
-- `.card-compare` — Orange gradient header for Compare At Price Chart
-- Responsive table and badge styles
+| Capability | Editor | Viewer |
+|---|---|---|
+| View live rates, history, logs | Yes | Yes |
+| Download generated files | Yes | Yes |
+| Run Pricing | Yes | No |
+| Upload source file | Yes | No |
+| Edit rate charts | Yes | No |
+| Set baseline | Yes | No |
 
 ---
 
-## The Price Formula
+## 5. Price Formula
 
-Every variant price is calculated using this formula:
+Every variant price is calculated **from scratch** using the full component formula:
 
 ```
-Price = ceil(gold_wt × gold_rate)
-      + ceil(diamond_wt × diamond_rate)
-      + ceil(gold_wt × making_charge)
+Price = ceil(gold_wt  x gold_rate)
+      + ceil(diamond_wt x diamond_rate)
+      + ceil(gold_wt  x making_charge)
       + huid_per_pc
-      + ceil(diamond_wt × certification)
-      + ceil(gem_wt × colorstone_rate)
+      + ceil(diamond_wt x certification)
+      + ceil(gem_wt   x colorstone_rate)
 ```
 
 Where:
-- **`gold_wt`** — From col 50 (14KT), 51 (18KT), or 52 (9KT) in the sheet
-- **`gold_rate`** — Live-scraped from IBJA (14KT, 18KT) or calculated (9KT)
-- **`diamond_wt`** — From col 55 in the sheet
-- **`diamond_rate`** — From rate config (per carat, quality-specific: GH I1-I2 or GH SI)
-- **`making_charge`** — Editable per gram (default ₹2,500)
-- **`huid_per_pc`** — Flat charge per variant (default ₹100)
-- **`certification`** — Per carat diamond labour (default ₹500)
-- **`gem_wt`** — From col 60; **`colorstone_rate`** — Per carat (default ₹1,500)
-- **`ceil()`** — `ceil_safe()` = `math.ceil(round(x, 6))` to avoid FP ceiling artifacts
+- **`gold_wt`** — Metal weight in grams from product metafield (col 50/51/52)
+- **`gold_rate`** — Live IBJA rate for that purity (14KT, 18KT, or calculated 9KT)
+- **`diamond_wt`** — Diamond total weight in carats from metafield (col 55)
+- **`diamond_rate`** — From rate config; quality-specific (GH I1-I2 or GH SI)
+- **`making_charge`** — Per gram making fee (editable, default Rs.2,500)
+- **`huid_per_pc`** — Flat per-variant fee (editable, default Rs.100)
+- **`certification`** — Per-carat diamond certification fee (editable, default Rs.500)
+- **`gem_wt`** — Gemstone total weight from metafield (col 60)
+- **`colorstone_rate`** — Per-carat coloured stone rate (editable, default Rs.1,500)
+- **`ceil()`** — Uses `ceil_safe(x) = math.ceil(round(x, 6))` to avoid floating-point artifacts
 
-### Dual Pricing
+### Dual Price Calculation
 
-Two prices are calculated per variant:
+Two separate prices are calculated per variant in a single pass:
 
-| Column | Name | Diamond Rates (defaults) | Purpose |
-|---|---|---|---|
-| **Col 24** | Variant Price | I1-I2: ₹39,500 · SI: ₹49,500 | Selling price (lower) |
-| **Col 25** | Compare At Price | I1-I2: ₹1,00,000 · SI: ₹1,25,000 | Strikethrough price (higher) |
+| Output Column | Purpose | Diamond Rate Chart |
+|---|---|---|
+| **Col 24** — Variant Price | Selling price shown to customer | Standard rates (lower) |
+| **Col 25** — Compare At Price | Strikethrough "was" price | Higher rates |
 
-Both use the same formula but with different rate charts (all 6 fields are independently editable).
+Default rate chart values:
+
+| Field | Variant Price | Compare At Price |
+|---|---|---|
+| Diamond GH I1-I2 | Rs.39,500/ct | Rs.1,00,000/ct |
+| Diamond GH SI | Rs.49,500/ct | Rs.1,25,000/ct |
+| Coloured stone | Rs.1,500/ct | Rs.1,500/ct |
+| HUID per pc | Rs.100 | Rs.100 |
+| Certification | Rs.500/ct | Rs.500/ct |
+| Making charge | Rs.2,500/g | Rs.2,500/g |
+
+All 12 fields are editable in real time from the dashboard without redeploying.
 
 ---
 
-## 9KT Rate Calculation
+## 6. 9KT Rate Calculation
 
-9KT is not published by IBJA. It's derived from:
+IBJA does not publish a 9KT rate. It is derived using a cross-source formula:
 
 ```
-9KT = round(Fine Gold 999 × 0.375 + (18KT − 750 purity))
+9KT = round( Fine Gold 999 x 0.375  +  (18KT_ibja - 750_purity_ibjarates) )
 ```
 
 | Component | Source |
 |---|---|
-| Fine Gold 999 | ibja.co |
-| 18KT | ibja.co |
-| 750 purity | ibjarates.com |
+| Fine Gold 999 (Rs/gram) | ibja.co — "Retail selling Rates" section |
+| 18KT (Rs/gram) | ibja.co — same section |
+| 750 purity (Rs/gram) | ibjarates.com — "750 Purity" label |
 
-**Example (PM rates):**
+**Example calculation (PM session, 07 Mar 2026):**
+
 ```
 Fine Gold 999 = 15,941
 18KT          = 12,912
 750 purity    = 11,956
 
-9KT = round(15,941 × 0.375 + (12,912 − 11,956))
-    = round(5,977.875 + 956)
-    = round(6,933.875)
-    = 6,934
+Premium = 18KT - 750 purity = 12,912 - 11,956 = 956
+Base    = Fine Gold 999 x 0.375 = 15,941 x 0.375 = 5,977.88
+9KT     = round(5,977.88 + 956) = 6,934
 ```
 
 ---
 
-## Excel/CSV Sheet Structure
+## 7. Shopify Metafield Mapping
 
-The tool reads and writes Shopify product export files. Key columns (1-based):
+All gold and diamond weights are stored as **product-level metafields** in Shopify, not variant-level. The GraphQL export queries them from the `products` node and copies them to every variant row of that product during JSONL-to-CSV conversion.
 
-| Column | Header | Read/Write | Purpose |
+**Confirmed metafield namespace.key values:**
+
+| What | Namespace | Key | Type |
 |---|---|---|---|
-| 1 | Handle | Read | Product identifier |
-| 13 | Option2 Value | Read | Gold quality (e.g. "14KT-Yellow") |
-| 16 | Option3 Value | Read | Diamond quality (e.g. "GH I1-I2") |
-| **24** | **Variant Price** | **Write** | Calculated selling price |
-| **25** | **Variant Compare At Price** | **Write** | Calculated strikethrough price |
-| 50 | Metafield (14KT weight) | Read | Gold weight in grams |
-| 51 | Metafield (18KT weight) | Read | Gold weight in grams |
-| 52 | Metafield (9KT weight) | Read | Gold weight in grams |
-| 55 | Metafield (Diamond weight) | Read | Diamond total weight in carats |
-| 60 | Metafield (Gemstone weight) | Read | Gemstone total weight in carats |
+| 14KT gold weight | `custom` | `14kt_metal_weight` | number_decimal |
+| 18KT gold weight | `custom` | `18kt_metal_weight` | number_decimal |
+| 9KT gold weight | `custom` | `9kt_metal_weight` | number_decimal |
+| Diamond total weight | `custom` | `diamond_total_weight` | number_decimal |
+| Gemstone total weight | `custom` | `gemstone_total_weight` | single_line_text |
 
-All 82 columns are preserved in the output — only columns 24 and 25 are modified.
+**Critical architecture note — JSONL parsing:**
+
+Shopify Bulk Operations outputs a `.jsonl` file where every nested connection is a **separate line**, not nested inside the parent. The parser uses three buckets:
+- Lines without `__parentId` — product objects
+- Lines with `__parentId` + `namespace` + `key` fields — metafield objects
+- All other lines with `__parentId` — variant objects
+
+Metafields are looked up by `parent_id` after parsing all lines. Do NOT attempt to access `product["metafields"]` — that key does not exist in the JSONL format.
 
 ---
 
-## Database Schema
+## 8. CSV Column Structure
 
-SQLite database (`gold_updater.db`) — auto-created on first run.
+The generated CSV has 84 columns: 82 matching the original Shopify product export format (so `update_prices.py` can read it without changes), plus two appended columns for automation use.
+
+**Critical columns:**
+
+| Col # | Header | Source | Used By |
+|---|---|---|---|
+| 13 | `Option2 Value` | `selectedOptions[1].value` | `update_prices.py` — gold quality detection |
+| 16 | `Option3 Value` | `selectedOptions[2].value` | `update_prices.py` — diamond quality detection |
+| **24** | **`Variant Price`** | Written by pricing engine | Shopify selling price |
+| **25** | **`Variant Compare At Price`** | Written by pricing engine | Shopify strikethrough price |
+| 50 | `14KT Metal Weight (product.metafields.custom.14kt_metal_weight)` | Product metafield | `update_prices.py` |
+| 51 | `18KT Metal Weight (product.metafields.custom.18kt_metal_weight)` | Product metafield | `update_prices.py` |
+| 52 | `9KT Metal weight (product.metafields.custom.9kt_metal_weight)` | Product metafield | `update_prices.py` |
+| 55 | `Diamond Total Weight (product.metafields.custom.diamond_total_weight)` | Product metafield | `update_prices.py` |
+| 60 | `Gemstone Total Weight (product.metafields.custom.gemstone_total_weight)` | Product metafield | `update_prices.py` |
+| 83 | `Variant ID` | GraphQL `id` field (numeric) | `shopify_push.py` |
+| 84 | `Product ID` | GraphQL `id` field (numeric) | `shopify_push.py` |
+
+> **Note on API 2025-01:** The `option1`, `option2`, `option3` fields were removed from `ProductVariant` in Shopify API 2025-01. The export now uses `selectedOptions { name value }` and maps by array index position.
+
+---
+
+## 9. Database Schema
+
+PostgreSQL database (Railway). Tables are auto-created on first run via `init_db()`.
 
 ### `rate_history`
+
 | Column | Type | Description |
 |---|---|---|
-| id | INTEGER PK | Auto-increment |
+| id | SERIAL PK | Auto-increment |
 | timestamp | TEXT | ISO timestamp |
 | rate_14kt | REAL | 14KT rate scraped |
 | rate_18kt | REAL | 18KT rate scraped |
@@ -347,307 +492,487 @@ SQLite database (`gold_updater.db`) — auto-created on first run.
 | rate_9kt | REAL | Calculated 9KT rate |
 
 ### `update_log`
+
 | Column | Type | Description |
 |---|---|---|
-| id | INTEGER PK | Auto-increment |
+| id | SERIAL PK | Auto-increment |
 | timestamp | TEXT | ISO timestamp |
 | old_rate_14kt | REAL | Previous 14KT rate |
 | old_rate_18kt | REAL | Previous 18KT rate |
 | new_rate_14kt | REAL | New 14KT rate |
 | new_rate_18kt | REAL | New 18KT rate |
-| input_file | TEXT | Source filename |
-| output_file | TEXT | Generated filename |
-| variants_updated | INTEGER | Count of variants changed |
-| products_updated | INTEGER | Count of products changed |
-| status | TEXT | "success" or error |
-
-### `diamond_rate_history`
-| Column | Type | Description |
-|---|---|---|
-| id | INTEGER PK | Auto-increment |
-| timestamp | TEXT | ISO timestamp |
-| rate_i1i2 | REAL | GH I1-I2 rate per carat |
-| rate_si | REAL | GH SI rate per carat |
-
-### `diamond_update_log`
-Same structure as `update_log` but for diamond rate changes.
-
-### `base_rates`
-| Column | Type | Description |
-|---|---|---|
-| id | INTEGER PK | Auto-increment |
-| timestamp | TEXT | ISO timestamp |
-| rate_14kt | REAL | Baseline 14KT |
-| rate_18kt | REAL | Baseline 18KT |
-| rate_9kt | REAL | Baseline 9KT |
+| input_file | TEXT | Source CSV filename |
+| output_file | TEXT | Generated output filename |
+| variants_updated | INTEGER | Count of variants recalculated |
+| products_updated | INTEGER | Count of products recalculated |
 
 ### `rate_config`
-12 editable fields (6 standard + 6 compare-at):
 
-| Column | Default | Description |
-|---|---|---|
-| diamond_i1i2 | 39,500 | GH I1-I2 rate/carat (Variant Price) |
-| diamond_si | 49,500 | GH SI rate/carat (Variant Price) |
-| colorstone_rate | 1,500 | Gemstone rate/carat |
-| huid_per_pc | 100 | Flat charge per variant |
-| certification | 500 | Diamond labour/carat |
-| making_charge | 2,500 | Gold making charge/gram |
-| cmp_diamond_i1i2 | 1,00,000 | GH I1-I2 rate/carat (Compare At) |
-| cmp_diamond_si | 1,25,000 | GH SI rate/carat (Compare At) |
-| cmp_colorstone_rate | 1,500 | Gemstone rate/carat (Compare At) |
-| cmp_huid_per_pc | 100 | Flat charge (Compare At) |
-| cmp_certification | 500 | Diamond labour/carat (Compare At) |
-| cmp_making_charge | 2,500 | Making charge/gram (Compare At) |
-
-### `users`
-| Column | Type | Description |
-|---|---|---|
-| id | INTEGER PK | Auto-increment |
-| username | TEXT UNIQUE | Login username |
-| password_hash | TEXT | Werkzeug hashed password |
-| role | TEXT | "editor" or "viewer" |
+Stores 12 editable pricing fields (6 for Variant Price + 6 for Compare At Price). Only the latest row is used.
 
 ### `uploaded_files`
+
 | Column | Type | Description |
 |---|---|---|
-| id | INTEGER PK | Auto-increment |
+| id | SERIAL PK | Auto-increment |
 | timestamp | TEXT | Upload time |
-| filename | TEXT | Stored filename (UUID-prefixed) |
+| filename | TEXT | UUID-prefixed stored filename |
 | original_name | TEXT | User's original filename |
 | is_active | INTEGER | 1 = current source file |
+| file_data | BYTEA | File bytes stored in DB (survives Railway redeploys) |
+
+### `generated_files`
+
+Stores the bytes of generated output CSVs in PostgreSQL so they survive Railway's ephemeral filesystem.
+
+### `users`
+
+| Column | Type | Description |
+|---|---|---|
+| id | SERIAL PK | Auto-increment |
+| username | TEXT UNIQUE | Login username |
+| password_hash | TEXT | Werkzeug pbkdf2 hash |
+| role | TEXT | `editor` or `viewer` |
 
 ---
 
-## REST API Reference
+## 10. REST API Reference
 
-All API endpoints require login unless noted. Editor-only endpoints require the `editor` role.
+All endpoints except `/api/auth/login` require a valid session cookie. All POST/DELETE endpoints (except login) require `X-CSRF-Token` header.
 
-### Authentication
+### Auth
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Body / Response |
 |---|---|---|---|
-| GET | `/login` | — | Login page |
-| POST | `/api/auth/login` | — | `{"username", "password"}` → session cookie |
-| POST | `/api/auth/logout` | Any | Clear session |
-| GET | `/api/auth/me` | Any | Current user info |
+| `POST` | `/api/auth/login` | — | `{username, password}` -> sets session cookie |
+| `POST` | `/api/auth/logout` | Any | Clears session |
+| `GET` | `/api/auth/me` | Any | `{ok, user: {username, role}}` or 401 |
 
 ### Rates
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| GET | `/api/rates/current` | Any | Live-scrape IBJA + ibjarates.com |
-| GET | `/api/rates/stored` | Any | Last applied baseline rate |
-| GET | `/api/rates/history` | Any | Rate history (`?limit=50`) |
+| `GET` | `/api/rates/current` | Any (authenticated) | Live-scrape ibja.co + ibjarates.com |
+| `GET` | `/api/rates/stored` | Any (authenticated) | Last baseline rate from DB |
+| `GET` | `/api/rates/history` | Any (authenticated) | Rate history (`?limit=50`) |
 
-### Config (Rate Charts)
+### Config
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| GET | `/api/config` | Any | All 12 editable rate fields |
-| POST | `/api/config` | Editor | Update all 12 fields |
+| `GET` | `/api/config` | Any (authenticated) | All 12 editable rate fields |
+| `POST` | `/api/config` | Editor | Save all 12 fields |
 
-### Update
+### Update / Pricing
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| POST | `/api/update/run` | Editor | Scrape + recalculate + generate output file |
-| POST | `/api/update/force` | Editor | Store current IBJA rate as baseline |
+| `POST` | `/api/update/run` | Editor | Scrape rates -> recalculate all prices -> save CSV |
+| `POST` | `/api/update/force` | Editor | Store current IBJA rate as baseline without recalculating |
 
 ### File Upload
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| POST | `/api/upload` | Editor | Upload CSV/XLSX (multipart `file`) |
-| GET | `/api/upload/active` | Any | Current active source file info |
-| GET | `/api/upload/list` | Any | List all uploaded source files |
+| `POST` | `/api/upload` | Editor | Upload source CSV/XLSX (multipart `file` field) |
+| `GET` | `/api/upload/active` | Any (authenticated) | Currently active source file metadata |
+| `GET` | `/api/upload/list` | Any (authenticated) | All uploaded source files |
+| `DELETE` | `/api/upload/<filename>/delete` | Editor | Delete an uploaded file |
 
-### Sheets (Output Files)
+### Generated Sheets
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| GET | `/api/sheets` | Any | List all generated files with metadata |
-| GET | `/api/sheets/<filename>/download` | Any | Download a generated file |
+| `GET` | `/api/sheets` | Any (authenticated) | List all generated output files |
+| `GET` | `/api/sheets/<file>/download` | Any (authenticated) | Download a generated CSV/XLSX |
+| `DELETE` | `/api/sheets/<file>/delete` | Editor | Delete a generated file |
 
 ### Logs
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Role | Description |
 |---|---|---|---|
-| GET | `/api/logs` | Any | Update history (`?limit=50`) |
-| GET | `/api/diamond/logs` | Any | Diamond update history |
+| `GET` | `/api/logs` | Any (authenticated) | Pricing run history (`?limit=50`) |
+| `GET` | `/api/diamond/logs` | Any (authenticated) | Diamond update history |
 
 ---
 
-## Web Dashboard Guide
+## 11. File-by-File Explanation
+
+### `app.py` — Flask Web Server
+
+The main web application with 20+ routes. Handles authentication, CSRF protection, rate limiting, file upload/download, and orchestrates calls to the pricing engine. Never modify unless adding new web features.
+
+### `scraper.py` — IBJA Rate Scraper
+
+Scrapes ibja.co for 14KT, 18KT, Fine Gold 999 rates and ibjarates.com for 750 purity. Calculates 9KT using the cross-source formula. Returns a dict with all rates, session (AM/PM), and date. Never modify the formula here.
+
+### `update_prices.py` — Pricing Engine
+
+Reads the uploaded source CSV/XLSX, detects column headers dynamically, applies the full component formula to every 9KT/14KT/18KT variant, and writes the output file. Handles both CSV and XLSX formats. Supports automatic column header detection with fallback to hardcoded positions.
+
+### `database.py` — PostgreSQL Layer
+
+Manages all database operations using `psycopg2`. Reads `DATABASE_URL` from environment. Provides functions for rate history, update logs, rate config, user authentication, file tracking, and generated file storage.
+
+### `shopify_export.py` — Shopify GraphQL Bulk Export
+
+Fetches the complete product catalog directly from Shopify using the Bulk Operations API. Handles the full flow: submit job -> poll until complete -> download `.jsonl` -> parse -> convert to 84-column CSV. Implements rate limiting, exponential backoff, null-check on `currentBulkOperation`, and automatic JSONL cleanup via `try/finally`.
+
+### `shopify_push.py` — Shopify GraphQL Price Push
+
+Reads the pricing output CSV, groups variants by Product ID, and sends `productVariantsBulkUpdate` mutations — one per product (~939 calls total). Uses 0.2s minimum delay between calls. Each call takes 1–3 seconds on Shopify's side. Total push time is 15–25 minutes for 939 products. Handles 429 rate limiting, retries with exponential backoff, collects all failures without stopping the run.
+
+### `automation.py` — Main Pipeline Orchestrator
+
+The script Railway runs at 12PM and 5PM IST. Calls all 5 stages in sequence with full error handling. Every stage is wrapped in `try/except` — any failure sends a Telegram alert and exits with code 1. Timestamps every log line. Handles CSRF token extraction from Flask's HTML response.
+
+### `nightly_sync.py` — New Product Detector
+
+Runs at 2AM IST. Fetches a fresh Shopify export, compares variant count to the most recent generated sheet, and uploads the new file if count increased. Sends Telegram alert only when new products are detected.
+
+### `AUTOMATION_ROADMAP.md` — Technical Design Document
+
+Complete internal documentation covering the full pipeline design, all code with explanations, error handling decisions, build order, and security checklist. Reference this when making any changes to the automation system.
+
+### `requirements.txt` — Python Dependencies
+
+```
+flask==3.1.0
+openpyxl==3.1.5
+requests==2.32.3
+beautifulsoup4==4.13.3
+gunicorn==23.0.0
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+```
+
+### `Procfile` — Railway/Gunicorn Start Command
+
+```
+web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4
+```
+
+---
+
+## 12. Folder Structure
+
+```
+gold auto/
+|
++-- app.py                    <- Flask web server (20+ routes)
++-- scraper.py                <- IBJA + ibjarates.com scraper + 9KT formula
++-- database.py               <- PostgreSQL layer (psycopg2)
++-- update_prices.py          <- Pricing engine (full formula, CSV + XLSX)
+|
++-- automation.py             <- Main automation pipeline (5 stages)
++-- shopify_export.py         <- GraphQL Bulk Export
++-- shopify_push.py           <- GraphQL price push
++-- nightly_sync.py           <- Nightly new-product detection
+|
++-- requirements.txt          <- Python dependencies
++-- Procfile                  <- Railway/Gunicorn start command
++-- AUTOMATION_ROADMAP.md     <- Full technical design document
++-- .env.example              <- Template for all required env vars (safe to commit)
++-- .env                      <- Local secrets -- NEVER commit this
++-- .gitignore                <- Excludes .env, *.db, uploads/, updated_sheets/
+|
++-- static/
+|   +-- css/
+|   |   +-- style.css         <- Dashboard styling (Bootstrap + custom)
+|   +-- js/
+|       +-- app.js            <- Dashboard logic (rates, config, upload, sheets)
+|
++-- templates/
+|   +-- index.html            <- Main dashboard (logged-in view)
+|   +-- login.html            <- Gold-themed login page
+|
++-- uploads/                  <- Uploaded CSV/XLSX source files (gitignored)
++-- updated_sheets/           <- Generated output files (gitignored)
+```
+
+---
+
+## 13. Web Dashboard Guide
 
 ### Login
-Navigate to `http://127.0.0.1:5000`. You'll see a gold-themed login page.
 
-**Default credentials:**
-| Username | Password | Role |
-|---|---|---|
-| admin | admin123 | editor |
-| viewer | viewer123 | viewer |
+Navigate to your Railway URL (or `http://localhost:5000` locally). Credentials are set via `FLASK_EDITOR_USERNAME` / `FLASK_EDITOR_PASSWORD` environment variables.
 
-### Main Dashboard (after login)
+> **Note:** Local login over `http://` will show 401 after login due to the `Secure` cookie flag. This is not a bug — test against the Railway HTTPS URL instead.
+
+### Main Dashboard Layout
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  TaaraLaxmii Gold Updater          [admin] editor  [Logout] │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ Live IBJA    │  │ Last Applied │  │ Delta        │       │
-│  │ Rates        │  │ Rates        │  │              │       │
-│  │              │  │              │  │              │       │
-│  │ 14KT: 10537 │  │ 14KT: 10450 │  │ 14KT: +87   │       │
-│  │ 18KT: 12912 │  │ 18KT: 12800 │  │ 18KT: +112  │       │
-│  │ 9KT:  6934  │  │ 9KT:  6900  │  │ 9KT:  +34   │       │
-│  │ 750p: 11956 │  │              │  │              │       │
-│  │ 9KT = ...   │  │              │  │              │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-│                                                              │
-│  ┌─── Variant Price Chart ───┐  ┌── Compare At Price Chart ─┐│
-│  │ (blue header, "Selling    │  │ (orange header,            ││
-│  │  Price" badge)            │  │  "Strikethrough" badge)    ││
-│  │                           │  │                            ││
-│  │ Diamond GH I1-I2: 39500  │  │ Diamond GH I1-I2: 100000  ││
-│  │ Diamond GH SI:    49500  │  │ Diamond GH SI:    125000  ││
-│  │ Colorstone Rate:  1500   │  │ Colorstone Rate:  1500    ││
-│  │ HUID per pc:      100    │  │ HUID per pc:      100     ││
-│  │ Certification:    500    │  │ Certification:    500     ││
-│  │ Making Charge:    2500   │  │ Making Charge:    2500    ││
-│  └───────────────────────────┘  └────────────────────────────┘│
-│                                                              │
-│  [Save Both Charts]                                          │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────────┐│
-│  │ [Run Pricing]  [Set Baseline]  [Upload CSV / XLSX]       ││
-│  └──────────────────────────────────────────────────────────┘│
-│                                                              │
-│  ┌──────────────────────────────────────────────────────────┐│
-│  │ [Generated Sheets] [Uploaded Files] [Rate Hist] [Logs]   ││
-│  │                                                          ││
-│  │  products_20250609_1430_PM.csv  [Latest]  [Download]     ││
-│  │  products_20250609_1105_AM.xlsx           [Download]     ││
-│  │  ...                                                     ││
-│  └──────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────┘
++--------------------------------------------------------------+
+|  TaaraLaxmii Gold Updater       [username] editor  [Logout] |
++--------------------------------------------------------------+
+|                                                              |
+|  +--------------+  +--------------+  +------------------+   |
+|  | Live IBJA    |  | Last Applied |  | Rate Delta       |   |
+|  | Rates        |  | Rates        |  |                  |   |
+|  |              |  |              |  | 14KT: +87        |   |
+|  | 14KT: 10,537 |  | 14KT: 10,450 |  | 18KT: +112       |   |
+|  | 18KT: 12,912 |  | 18KT: 12,800 |  |  9KT: +34        |   |
+|  |  9KT:  6,934 |  |  9KT:  6,900 |  |                  |   |
+|  |  750: 11,956 |  |              |  |                  |   |
+|  +--------------+  +--------------+  +------------------+   |
+|                                                              |
+|  +-- Variant Price Chart (blue) ---+                        |
+|  | Diamond GH I1-I2: 39500         |                        |
+|  | Diamond GH SI:    49500         |                        |
+|  | Colorstone Rate:  1500          |                        |
+|  | HUID per pc:      100           |                        |
+|  | Certification:    500           |                        |
+|  | Making Charge:    2500          |                        |
+|  +---------------------------------+                        |
+|                                                              |
+|  +-- Compare At Price Chart (orange) ---+                   |
+|  | Diamond GH I1-I2: 100000             |                   |
+|  | Diamond GH SI:    125000             |                   |
+|  | Colorstone Rate:  1500               |                   |
+|  | HUID per pc:      100                |                   |
+|  | Certification:    500                |                   |
+|  | Making Charge:    2500               |                   |
+|  +--------------------------------------+                   |
+|                                                              |
+|  [Save Both Charts]                                          |
+|                                                              |
+|  [Run Pricing]  [Set Baseline]  [Upload CSV / XLSX]          |
+|                                                              |
+|  [Generated Sheets] [Uploaded Files] [Rate History] [Logs]  |
+|  +----------------------------------------------------------+|
+|  | products_07Mar2026_1204_PM.csv  [LATEST] [Download]      ||
+|  | products_07Mar2026_0900_AM.csv           [Download]      ||
+|  +----------------------------------------------------------+|
++--------------------------------------------------------------+
 ```
 
-**Viewer role:** Can see everything but action buttons (Run Pricing, Set Baseline, Upload, Save Charts) are hidden.
+### Day-to-Day Usage (Manual Mode)
+
+Normally the automation handles everything. If you need to run manually:
+
+1. Upload your latest Shopify product export CSV via **Upload CSV / XLSX**
+2. Verify live rates look correct in the **Live IBJA Rates** card
+3. Click **Run Pricing**
+4. Go to **Generated Sheets** tab -> download the **Latest** file
+5. Import into Shopify via `Products -> Import`
 
 ---
 
-## Installation
+## 14. Tech Stack
+
+| Layer | Technology | Version |
+|---|---|---|
+| **Backend language** | Python | 3.12 |
+| **Web framework** | Flask | 3.1.0 |
+| **WSGI server** | Gunicorn | 23.0.0 |
+| **Database** | PostgreSQL | (Railway managed) |
+| **DB driver** | psycopg2-binary | 2.9.10 |
+| **Web scraping** | requests + BeautifulSoup4 | 2.32.3 / 4.13.3 |
+| **Excel processing** | openpyxl | 3.1.5 |
+| **CSV processing** | csv (Python stdlib) | — |
+| **JSON Lines parsing** | json (Python stdlib) | — |
+| **Environment vars** | python-dotenv | 1.0.1 |
+| **Password hashing** | werkzeug.security (pbkdf2) | — |
+| **Frontend** | HTML5, Bootstrap 5.3.3, Vanilla JS ES6+ | — |
+| **Icons** | Bootstrap Icons | — |
+| **Shopify integration** | GraphQL Admin API | 2025-01 |
+| **Notifications** | Telegram Bot API | — |
+| **Deployment** | Railway | — |
+| **Source control** | Git + GitHub (private repo) | — |
+| **Data sources** | ibja.co + ibjarates.com | — |
+
+---
+
+## 15. Railway Deployment
+
+### Project Structure on Railway
+
+```
+Railway Project: TaaraLaxmii
+|
++-- Service 1: flask-app          <- Flask web app (always running)
+|   Start: gunicorn app:app       <- from Procfile
+|
++-- Service 2: automation-cron    <- automation.py
+|   Start: python automation.py
+|   Cron:  30 6,11 * * *          <- 12:00 PM + 5:00 PM IST
+|
++-- Service 3: nightly-sync-cron  <- nightly_sync.py
+|   Start: python nightly_sync.py
+|   Cron:  30 20 * * *            <- 2:00 AM IST
+|
++-- Database: PostgreSQL          <- Persistent storage
+```
+
+### Cron Schedule Reference
+
+| Service | Cron (UTC) | IST time | Purpose |
+|---|---|---|---|
+| automation-cron | `30 6,11 * * *` | 12:00 PM + 5:00 PM | Twice-daily pricing |
+| nightly-sync-cron | `30 20 * * *` | 2:00 AM | New product detection |
+
+> IST = UTC + 5:30. All Railway cron times are in UTC.
+
+### Build Command (all services)
+
+```
+pip install -r requirements.txt
+```
+
+### Start Commands
+
+| Service | Command |
+|---|---|
+| flask-app | `gunicorn app:app` (Procfile) |
+| automation-cron | `python automation.py` |
+| nightly-sync-cron | `python nightly_sync.py` |
+
+---
+
+## 16. Environment Variables
+
+All three Railway services share the same environment variables. Use `.env.example` as a template.
+
+| Variable | Required | Description |
+|---|---|---|
+| `SECRET_KEY` | Yes | Long hex string for Flask session signing |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (auto-provided by Railway) |
+| `FLASK_APP_URL` | Yes | Public Railway URL, no trailing slash |
+| `FLASK_EDITOR_USERNAME` | Yes | Editor login username |
+| `FLASK_EDITOR_PASSWORD` | Yes | Editor login password |
+| `SHOPIFY_STORE` | Yes | `taara-laxmii.myshopify.com` |
+| `SHOPIFY_TOKEN` | Yes | Shopify Admin API token (`shpat_...`) |
+| `SHOPIFY_API_VERSION` | Yes | `2025-01` |
+| `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
+| `TELEGRAM_CHAT_ID` | Yes | Your personal Telegram chat ID |
+| `RATE_WAIT_TIMEOUT_HOURS` | Optional | Default: `2` |
+| `RATE_CHECK_INTERVAL_MINUTES` | Optional | Default: `5` |
+| `BULK_EXPORT_TIMEOUT_MINUTES` | Optional | Default: `15` |
+| `BULK_EXPORT_POLL_INTERVAL_SECONDS` | Optional | Default: `10` |
+| `MIN_EXPECTED_VARIANT_ROWS` | Optional | Default: `1000` |
+| `PUSH_DELAY_SECONDS` | Optional | Default: `0.2` |
+| `PUSH_MAX_RETRIES` | Optional | Default: `3` |
+| `PUSH_FAILURE_THRESHOLD_PERCENT` | Optional | Default: `5` |
+| `RATE_SANITY_14KT_MIN` / `MAX` | Optional | Default: 5000 / 25000 |
+| `RATE_SANITY_18KT_MIN` / `MAX` | Optional | Default: 7000 / 35000 |
+| `RATE_SANITY_9KT_MIN` / `MAX` | Optional | Default: 3000 / 15000 |
+
+---
+
+## 17. Local Development Setup
 
 ### Prerequisites
 
-- **Python 3.10+** (tested with 3.12)
-- **pip** (comes with Python)
+- Python 3.10+
+- A PostgreSQL database (local or Railway)
+- A `.env` file filled in from `.env.example`
 
 ### Steps
 
 ```bash
-# 1. Clone or download the project
-cd "gold auto"
+# 1. Clone the repo
+git clone https://github.com/RUBACUS/gold-auto.git
+cd gold-auto
 
-# 2. Install dependencies
+# 2. Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # macOS/Linux
+
+# 3. Install dependencies
 pip install -r requirements.txt
-```
 
-This installs:
-- `flask==3.1.0` — Web framework
-- `openpyxl==3.1.5` — Excel read/write
-- `requests==2.32.3` — HTTP client for scraping
-- `beautifulsoup4==4.13.3` — HTML parsing
+# 4. Copy and fill in environment variables
+copy .env.example .env
+# Edit .env with your credentials
 
-No additional setup needed — the SQLite database, folders, and default users are auto-created on first run.
-
----
-
-## How to Run
-
-```bash
+# 5. Run the Flask app
 python app.py
 ```
 
-Opens at: **http://127.0.0.1:5000**
+Open: http://localhost:5000
+
+> **Important:** When running locally over http://, login will succeed (200) but subsequent requests will return 401 due to the `Secure` cookie flag. This is expected. To test authenticated endpoints locally, either disable `SESSION_COOKIE_SECURE` in `app.py` temporarily or test against your Railway HTTPS URL directly.
+
+### Test the Automation Scripts Individually
+
+```bash
+# Test Shopify export (generates a CSV in uploads/)
+python shopify_export.py
+
+# Test full pipeline
+# Note: On weekends/holidays IBJA rates are not published.
+# Add a test bypass to stage1_wait_for_rates() for local testing.
+python automation.py
+
+# Test nightly sync
+python nightly_sync.py
+```
 
 ---
 
-## First-Time Setup
+## 18. Security Notes
 
-1. **Start the server:** `python app.py`
-2. **Open browser:** http://127.0.0.1:5000
-3. **Log in** with `admin` / `admin123`
-4. **Upload your Shopify product export** (CSV or XLSX) via the Upload button — or place it as `products_export_1.xlsx` in the project root
-5. **Review the rate charts** — adjust diamond rates, making charge, etc. as needed for both Variant Price and Compare At Price charts
-6. **Click "Set Baseline"** to store the current IBJA rate
-7. **Click "Run Pricing"** to generate your first output file
-8. **Download** the generated file and import into Shopify
-
----
-
-## Day-to-Day Usage
-
-1. Open dashboard, log in
-2. Check the Live IBJA Rates card — rates update automatically (AM and PM sessions)
-3. Click **Run Pricing** — generates a new output file with recalculated prices
-4. Go to **Generated Sheets** tab, download the latest file (marked with **Latest** badge)
-5. Import into Shopify
-
-If diamond rates or making charges change, update them in the price chart cards and click **Save Both Charts** before running pricing.
+- `.env` is in `.gitignore` — never commit secrets to Git
+- `uploads/` and `updated_sheets/` are gitignored — never commit customer data
+- `gold_updater.db` (old SQLite file) must be removed from Git history if present — it contains user data
+- The Shopify Custom App uses minimum required scopes: `read_products`, `write_products`
+- Credentials are set via Railway environment variables — nothing is hardcoded in any file
+- `SECRET_KEY` must be a long random string — generate with:
+  `python -c "import secrets; print(secrets.token_hex(32))"`
+- All API secrets are loaded via `os.environ.get()` — never hardcoded
+- Telegram bot only sends to the specific `TELEGRAM_CHAT_ID` configured
+- If the Shopify token is ever exposed (shared in chat, committed to Git, etc.) — regenerate it immediately in Shopify Admin → Settings → Apps → TaaraLaxmiiAutomation → API credentials
 
 ---
 
-## What Gets Updated
+## 19. Troubleshooting
 
-| What | Updated? | Details |
-|---|---|---|
-| **9KT variants** | ✅ Yes | Using derived 9KT rate from ibjarates formula |
-| **14KT variants** | ✅ Yes | Using live 14KT from ibja.co |
-| **18KT variants** | ✅ Yes | Using live 18KT from ibja.co |
-| **Variant Price (col 24)** | ✅ Yes | Standard rate chart |
-| **Compare At Price (col 25)** | ✅ Yes | Higher-rate chart (strikethrough) |
-| **Color variants** (Yellow/Rose/White) | N/A | Same product, same weight → same price |
-| **Diamond quality** (GH SI, GH I1-I2) | ✅ Yes | Quality-specific diamond rates applied |
-| **Original file** | ❌ Never | Original upload is never modified |
+### Automation waits 2 hours then exits with no pricing run
 
----
+**Cause:** IBJA did not publish rates. This happens every Saturday, Sunday, and Indian public holiday. This is normal, expected behaviour — no action needed. The system resumes automatically on the next trading day.
 
-## Troubleshooting
+### "Field 'option1' doesn't exist on type 'ProductVariant'"
+
+Shopify API 2025-01 removed `option1/2/3` fields. The export now uses `selectedOptions { name value }`. This is already fixed in `shopify_export.py`. If you see this error, check that `SHOPIFY_API_VERSION=2025-01` is set and the correct version of `shopify_export.py` is deployed.
+
+### "currentBulkOperation returns null"
+
+Normal when no bulk job is running yet. The poller checks for `None` before accessing `status`. If this persists beyond 30 seconds, a previous bulk job may still be running — wait a few minutes and retry.
+
+### "Bulk export submission error: another operation already running"
+
+Only one bulk operation can run at a time per Shopify store. Wait for the previous one to complete (check in Shopify Admin → Settings → Bulk operations), then retry.
+
+### 401 errors after login when testing locally
+
+The session cookie has `Secure` flag set — it only transmits over HTTPS. Local `http://` testing will always show 401 after login. Test against your Railway HTTPS URL instead.
 
 ### "Could not find 'Retail selling Rates' section on IBJA page"
-- IBJA's website structure may have changed or the site is temporarily down
-- Try again in 15–30 minutes
-- Check https://ibja.co/ manually
 
-### "Could not find 750 purity rate on ibjarates.com"
-- ibjarates.com may be down or have changed its HTML structure
-- Check https://ibjarates.com/ manually
+IBJA's website is down or its HTML structure changed. Stage 1 retries every 5 minutes for 2 hours, then sends a Telegram alert and exits. Fix: update `scraper.py` to match the new IBJA HTML structure.
 
-### Browser shows "This site can't be reached"
-- Flask server is not running — run `python app.py`
+### "Flask login failed: HTTP 429"
 
-### Login fails with default credentials
-- On first start, `admin/admin123` and `viewer/viewer123` are auto-seeded
-- If the database was deleted or recreated, restart the server
+Login rate limit triggered (5 attempts per 5 minutes per IP). Wait 5 minutes. Verify `FLASK_EDITOR_USERNAME` and `FLASK_EDITOR_PASSWORD` in Railway match your actual credentials.
 
-### Output file is smaller than original
-- Normal — openpyxl doesn't preserve all Excel formatting metadata
-- All 82 columns and all data rows are complete
+### "CSRF validation failed"
 
----
+The automation extracts the CSRF token from page HTML after login. If this fails, all POST requests will be rejected with 403. Check that `FLASK_APP_URL` is correct and has no trailing slash, and that the app is running on Railway.
 
-## Tech Stack
+### "Only N rows found — expected at least 1000"
 
-| Layer | Technology |
-|---|---|
-| **Backend** | Python 3.12, Flask 3.1 |
-| **Web Scraping** | requests, BeautifulSoup4 |
-| **Excel Processing** | openpyxl, csv (stdlib) |
-| **Database** | SQLite (Python's built-in `sqlite3`) |
-| **Auth** | Flask sessions, werkzeug password hashing |
-| **Frontend** | HTML5, Bootstrap 5.3.3, Bootstrap Icons, Vanilla JS (ES6+) |
-| **Data Sources** | [ibja.co](https://ibja.co/) + [ibjarates.com](https://ibjarates.com/) |
-| **Target Platform** | Shopify (product export/import via CSV/XLSX) |
+The Shopify export returned fewer rows than the safety threshold. Could be a temporary Shopify API issue. Re-run manually. If your store genuinely has fewer than 1,000 variants, lower `MIN_EXPECTED_VARIANT_ROWS` in Railway env vars.
+
+### Prices not updating in Shopify after push
+
+Check Railway logs for `[Push] Product XXXXX errors:` lines. Most common causes: Shopify token lacks `write_products` scope, or token has expired. Regenerate in Shopify Admin → Settings → Apps → TaaraLaxmiiAutomation → API credentials.
+
+### Automation takes 20-25 minutes — is this normal?
+
+Yes. Stage 4 (price push) takes 15–25 minutes because each GraphQL mutation requires 1–3 seconds of Shopify processing time per product, multiplied by 939 products. The 0.2s sleep between calls is a minimum floor — it does not control Shopify's server response time. Total observed time on 07 Mar 2026: 22 minutes 57 seconds for 939 products and 55,098 variants. This is expected and correct.
+
+### Railway disk is ephemeral — files disappear after redeploy
+
+Expected behaviour. Uploaded files and generated sheets are stored in PostgreSQL (`uploaded_files.file_data`, `generated_files.file_data`) and restored to disk on demand. Do not rely on files persisting on Railway's local filesystem between redeploys.
