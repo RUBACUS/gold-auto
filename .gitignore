@@ -16,6 +16,8 @@ uploads/
 
 # Environment / secrets
 .env
+.env.local
+.env.*.local
 
 # Virtual envs
 .venv/
