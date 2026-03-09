@@ -272,7 +272,8 @@ def stage4_push_prices(output_csv):
 # ── Stage 5 — Telegram Notification ──────────────────────────
 
 def stage5_notify(rates, row_count, variants_done, products_done,
-                  push_success, failed_products, duration_sec):
+                  push_success, failed_products, duration_sec,
+                  metaobject_ok=True):
     minutes = int(duration_sec // 60)
     seconds = int(duration_sec % 60)
     session_name = rates["session"]
@@ -287,6 +288,8 @@ def stage5_notify(rates, row_count, variants_done, products_done,
     else:
         status_icon = "❌"
         status_line = f"CRITICAL: {failures} products failed to update!"
+
+    rate_display_line = "🔢 Rate Display: Updated" if metaobject_ok else "🔢 Rate Display: Failed — check logs"
 
     msg = (
         f"{status_icon} <b>TaaraLaxmii Pricing Updated</b>\n"
@@ -303,7 +306,8 @@ def stage5_notify(rates, row_count, variants_done, products_done,
         f"  Variants updated: {variants_done}\n"
         f"  Push success:     {push_success} products\n"
         f"  Push failed:      {failures} products\n\n"
-        f"⏱ Duration: {minutes}m {seconds}s\n\n"
+        f"⏱ Duration: {minutes}m {seconds}s\n"
+        f"{rate_display_line}\n\n"
         f"📋 {status_line}"
     )
 
@@ -315,6 +319,67 @@ def stage5_notify(rates, row_count, variants_done, products_done,
             msg += f"  ... and {len(failed_products) - 10} more. Check Railway logs."
 
     send_telegram(msg)
+
+
+# ── Stage 6 — Update Gold Rate Metaobject ────────────────────
+
+def stage6_update_rate_metaobject(rates):
+    from shopify_push import GRAPHQL_URL, HEADERS
+
+    print(f"\n[{_ts()}] [Stage 6] Updating Gold Rate metaobject in Shopify...")
+
+    mutation = """
+    mutation UpdateGoldRateMetaobject($id: ID!, $fields: [MetaobjectFieldInput!]!) {
+      metaobjectUpdate(id: $id, metaobject: { fields: $fields }) {
+        metaobject { id }
+        userErrors { field message }
+      }
+    }
+    """
+
+    variables = {
+        "id": "gid://shopify/Metaobject/169970499905",
+        "fields": [
+            {"key": "rate_24kt_999", "value": str(rates["fine_gold"])},
+            {"key": "rate_18kt",     "value": str(rates["rate_18kt"])},
+            {"key": "rate_14kt",     "value": str(rates["rate_14kt"])},
+            {"key": "rate_9kt",      "value": str(rates["rate_9kt"])},
+        ],
+    }
+
+    try:
+        resp = requests.post(
+            GRAPHQL_URL,
+            headers=HEADERS,
+            json={"query": mutation, "variables": variables},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        user_errors = (data.get("data") or {}).get("metaobjectUpdate", {}).get("userErrors", [])
+        if user_errors:
+            err_str = "; ".join(f"{e['field']}: {e['message']}" for e in user_errors)
+            print(f"[{_ts()}] [Stage 6] ⚠️  userErrors: {err_str}")
+            send_telegram(
+                f"⚠️ <b>Stage 6 — Rate Metaobject userErrors</b>\n"
+                f"Prices were pushed successfully, but the rate display metaobject could not be updated.\n"
+                f"Errors: {err_str}\nTime: {now_ist()}"
+            )
+            return False
+        print(
+            f"[{_ts()}] [Stage 6] ✅ Gold Rate metaobject updated — "
+            f"24KT: {rates['fine_gold']}, 18KT: {rates['rate_18kt']}, "
+            f"14KT: {rates['rate_14kt']}, 9KT: {rates['rate_9kt']}"
+        )
+        return True
+    except Exception as e:
+        print(f"[{_ts()}] [Stage 6] ⚠️  Exception: {e}")
+        send_telegram(
+            f"⚠️ <b>Stage 6 — Rate Metaobject Update Failed</b>\n"
+            f"Prices were pushed successfully, but the rate display metaobject could not be updated.\n"
+            f"Error: {e}\nTime: {now_ist()}"
+        )
+        return False
 
 
 # ── MAIN ─────────────────────────────────────────────────────
@@ -380,11 +445,15 @@ def main():
         print(f"[{_ts()}] [Main] Stage 4 failed: {e}")
         sys.exit(1)
 
+    # ── Stage 6 (non-critical — runs after push, before notify)
+    metaobject_ok = stage6_update_rate_metaobject(rates)
+
     # ── Stage 5
     duration = time.time() - start_time
     try:
         stage5_notify(rates, row_count, variants_done, products_done,
-                      push_success, failed_products, duration)
+                      push_success, failed_products, duration,
+                      metaobject_ok=metaobject_ok)
     except Exception as e:
         print(f"[{_ts()}] [Main] Stage 5 notification error (non-fatal): {e}")
 

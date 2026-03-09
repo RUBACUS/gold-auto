@@ -842,24 +842,24 @@ async function loadAutomationStatus() {
 function _applyAutomationUI(data) {
     var bar = document.getElementById("auto-bar");
     var label = document.getElementById("auto-bar-label");
-    var btn = document.getElementById("auto-toggle-btn");
+    var input = document.getElementById("auto-toggle-input");
     if (!bar || !label) return;
     if (data.enabled) {
         bar.className = "auto-bar enabled";
-        label.textContent = "Automation: Active — running on schedule";
-        if (btn) { btn.textContent = "Pause"; btn.style.borderColor = "rgba(248,113,113,0.5)"; btn.style.color = "#f87171"; }
+        label.textContent = "Automation: Active \u2014 running on schedule";
+        if (input) { input.checked = true; input.disabled = false; }
     } else {
         bar.className = "auto-bar paused";
         var who = data.paused_by ? " by " + data.paused_by : "";
         var when = data.paused_at ? " at " + data.paused_at : "";
         label.textContent = "Automation: Paused" + who + when;
-        if (btn) { btn.textContent = "Resume"; btn.style.borderColor = "rgba(74,222,128,0.5)"; btn.style.color = "#4ade80"; }
+        if (input) { input.checked = false; input.disabled = false; }
     }
 }
 
 async function toggleAutomation() {
-    var btn = document.getElementById("auto-toggle-btn");
-    if (btn) btn.disabled = true;
+    var input = document.getElementById("auto-toggle-input");
+    if (input) input.disabled = true;
     try {
         var res = await fetch("/api/automation/toggle", {
             method: "POST",
@@ -870,11 +870,14 @@ async function toggleAutomation() {
             _applyAutomationUI(data);
         } else {
             showAlert("error", data.error || "Toggle failed");
+            // Revert checkbox to previous state on failure
+            if (input) input.checked = !input.checked;
         }
     } catch(e) {
         showAlert("error", "Network error");
+        if (input) input.checked = !input.checked;
     } finally {
-        if (btn) btn.disabled = false;
+        if (input) input.disabled = false;
     }
 }
 

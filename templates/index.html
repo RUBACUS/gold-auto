@@ -41,7 +41,10 @@
     <span class="auto-bar-icon" id="auto-bar-icon">⬤</span>
     <span id="auto-bar-label">Automation: checking…</span>
     {% if user.role == 'editor' %}
-    <button class="auto-toggle-btn" id="auto-toggle-btn" onclick="toggleAutomation()">…</button>
+    <label class="auto-toggle" id="auto-toggle-wrap" title="Toggle automation">
+        <input type="checkbox" id="auto-toggle-input" onchange="toggleAutomation()" disabled>
+        <span class="auto-toggle-track"><span class="auto-toggle-thumb"></span></span>
+    </label>
     {% endif %}
 </div>
 
