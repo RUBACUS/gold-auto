@@ -826,6 +826,58 @@ function addLiveFeedItem(type, text) {
     countEl.textContent = currentCount + 1;
 }
 
+// == Automation Toggle ==
+
+async function loadAutomationStatus() {
+    try {
+        var res = await fetch("/api/automation/status");
+        var data = await res.json();
+        if (!data.ok) return;
+        _applyAutomationUI(data);
+    } catch(e) {
+        console.warn("Automation status fetch failed:", e);
+    }
+}
+
+function _applyAutomationUI(data) {
+    var bar = document.getElementById("auto-bar");
+    var label = document.getElementById("auto-bar-label");
+    var btn = document.getElementById("auto-toggle-btn");
+    if (!bar || !label) return;
+    if (data.enabled) {
+        bar.className = "auto-bar enabled";
+        label.textContent = "Automation: Active — running on schedule";
+        if (btn) { btn.textContent = "Pause"; btn.style.borderColor = "rgba(248,113,113,0.5)"; btn.style.color = "#f87171"; }
+    } else {
+        bar.className = "auto-bar paused";
+        var who = data.paused_by ? " by " + data.paused_by : "";
+        var when = data.paused_at ? " at " + data.paused_at : "";
+        label.textContent = "Automation: Paused" + who + when;
+        if (btn) { btn.textContent = "Resume"; btn.style.borderColor = "rgba(74,222,128,0.5)"; btn.style.color = "#4ade80"; }
+    }
+}
+
+async function toggleAutomation() {
+    var btn = document.getElementById("auto-toggle-btn");
+    if (btn) btn.disabled = true;
+    try {
+        var res = await fetch("/api/automation/toggle", {
+            method: "POST",
+            headers: { "X-CSRF-Token": CSRF_TOKEN, "Content-Type": "application/json" }
+        });
+        var data = await res.json();
+        if (data.ok) {
+            _applyAutomationUI(data);
+        } else {
+            showAlert("error", data.error || "Toggle failed");
+        }
+    } catch(e) {
+        showAlert("error", "Network error");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // == Init ==
 
 document.addEventListener("DOMContentLoaded", function() {
@@ -836,6 +888,7 @@ document.addEventListener("DOMContentLoaded", function() {
     fetchHistory();
     fetchLogs();
     fetchUploads();
+    loadAutomationStatus();
 
     if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {
         fetchConfig();

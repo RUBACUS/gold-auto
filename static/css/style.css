@@ -35,6 +35,16 @@ header{position:sticky;top:0;z-index:100;background:var(--white);border-bottom:1
 .tick{display:inline-flex;align-items:center;gap:8px;font-size:0.72rem}
 .tn{color:rgba(255,255,255,0.5)}.tv{color:#fff;font-family:'Ubuntu Mono',monospace}
 .tu{color:#4ade80;font-size:0.67rem}.td2{color:#f87171;font-size:0.67rem}
+/* Automation Bar */
+.auto-bar{display:flex;align-items:center;gap:10px;padding:6px 20px;font-size:0.75rem;font-weight:500;background:#1a1a2e;border-bottom:1px solid rgba(255,255,255,0.07);transition:background .3s}
+.auto-bar.enabled{background:rgba(22,163,74,0.12);border-bottom-color:rgba(74,222,128,0.18)}
+.auto-bar.paused{background:rgba(220,38,38,0.12);border-bottom-color:rgba(248,113,113,0.18)}
+.auto-bar-icon{font-size:0.55rem;line-height:1}
+.auto-bar.enabled .auto-bar-icon{color:#4ade80}
+.auto-bar.paused .auto-bar-icon{color:#f87171}
+.auto-bar #auto-bar-label{color:rgba(255,255,255,0.75);flex:1}
+.auto-toggle-btn{padding:3px 12px;border-radius:4px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.85);font-size:0.72rem;cursor:pointer;transition:background .2s}
+.auto-toggle-btn:hover{background:rgba(255,255,255,0.14)}
 /* Main Layout */
 .page-wrap{max-width:1420px;margin:0 auto;padding:20px 24px 48px;display:grid;grid-template-columns:1fr 320px;gap:20px}
 .main-col{display:flex;flex-direction:column;gap:16px}
@@ -262,6 +272,10 @@ body{overflow-x:hidden}
   .h-left .vr{display:none}
   #clock{display:none}
   .user-chip{padding:3px 8px;gap:5px}
+  /* Automation bar */
+  .auto-bar{padding:5px 16px;font-size:0.73rem}
+  /* Tab panel padding */
+  .htab-panel{padding:12px 14px}
 
   /* Page */
   .page-wrap{padding:12px 14px 32px;gap:12px}
@@ -297,10 +311,14 @@ body{overflow-x:hidden}
 @media(max-width:640px){
   html{font-size:13.5px}
 
-  /* Header: hide brand text and status dot, keep logo + username + logout */
-  .brand{display:none}
-  .status-pill{display:none}
+  /* Header: keep brand + live visible, just smaller */
+  .brand{font-size:0.82rem}
+  .status-pill{font-size:0.68rem;gap:4px}
+  .s-dot{width:5px;height:5px}
+  .h-left{gap:8px}
   header{padding:8px 12px}
+  /* Automation bar */
+  .auto-bar{padding:5px 12px;font-size:0.7rem;gap:8px}
 
   /* Page */
   .page-wrap{padding:10px 12px 28px;gap:10px}
@@ -329,6 +347,9 @@ body{overflow-x:hidden}
   /* Table rows */
   .sh-head,.uf-head,.sh-row,.uf-row{padding:8px 10px}
 
+  /* Tab panel */
+  .htab-panel{padding:10px 12px}
+
   /* Bottom layout gap */
   .bottom-layout{gap:12px}
 
@@ -344,9 +365,14 @@ body{overflow-x:hidden}
   .role-badge{display:none}
   .logout-btn{padding:3px 6px;font-size:0.65rem}
 
+  /* Automation bar */
+  .auto-bar{padding:4px 10px;font-size:0.68rem;gap:6px}
+  .auto-toggle-btn{padding:2px 8px;font-size:0.65rem}
+
   /* Page */
   .page-wrap{padding:8px 10px 24px;gap:8px}
   .hero-panel{padding:10px 10px 0}
+  .htab-panel{padding:8px 10px}
 
   /* Hero price */
   .price-hero{font-size:1.75rem;letter-spacing:0}
@@ -379,12 +405,15 @@ body{overflow-x:hidden}
 /* -- Very small phone (≤ 360 px) ----------------------------------------- */
 @media(max-width:360px){
   html{font-size:12.5px}
+  .brand{font-size:0.72rem;letter-spacing:0}
   .price-hero{font-size:1.5rem}
   .page-wrap{padding:6px 8px 20px;gap:6px}
   .hero-panel{padding:8px 8px 0}
-  .htab-panel{padding:8px 8px}
+  .htab-panel{padding:6px 8px}
   .sh-head,.uf-head,.sh-row,.uf-row{padding:6px 8px}
   .rc-val{font-size:1rem}
+  .auto-bar{padding:3px 8px;gap:6px}
+  .auto-toggle-btn{font-size:0.62rem;padding:2px 6px}
 }
 
 /* -- Touch devices: larger tap targets, prevent iOS input zoom ------------ */

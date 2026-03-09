@@ -320,6 +320,21 @@ def stage5_notify(rates, row_count, variants_done, products_done,
 # ── MAIN ─────────────────────────────────────────────────────
 
 def main():
+    # ── Kill-switch: check if automation is paused ────────────────
+    try:
+        from database import get_automation_enabled
+        if not get_automation_enabled():
+            msg = (
+                "⏸ <b>TaaraLaxmii Automation Paused</b>\n"
+                f"Run skipped at {now_ist()}.\n"
+                "Re-enable from the dashboard to resume."
+            )
+            send_telegram(msg)
+            print(f"[{_ts()}] [Main] Automation is paused. Exiting.")
+            sys.exit(0)
+    except Exception as _ks_exc:
+        print(f"[{_ts()}] [Main] Kill-switch check failed (continuing): {_ks_exc}")
+
     start_time = time.time()
     print(f"\n{'=' * 60}")
     print(f"[{_ts()}] TaaraLaxmii Automation Started — {now_ist()}")

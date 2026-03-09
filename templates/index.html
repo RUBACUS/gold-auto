@@ -36,6 +36,15 @@
     </div>
 </div>
 
+<!-- Automation Status Bar -->
+<div class="auto-bar" id="auto-bar">
+    <span class="auto-bar-icon" id="auto-bar-icon">⬤</span>
+    <span id="auto-bar-label">Automation: checking…</span>
+    {% if user.role == 'editor' %}
+    <button class="auto-toggle-btn" id="auto-toggle-btn" onclick="toggleAutomation()">…</button>
+    {% endif %}
+</div>
+
 <!-- Page Wrap -->
 <div class="page-wrap">
 

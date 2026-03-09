@@ -31,6 +31,7 @@ from database import (
     deactivate_active_upload, get_all_uploads, delete_uploaded_file_record,
     save_generated_file, get_generated_file,
     get_all_generated_files, delete_generated_file_record,
+    get_automation_enabled, set_automation_enabled,
 )
 from update_prices import run_update, run_diamond_update, OUTPUT_DIR, get_source_file
 
@@ -604,6 +605,44 @@ def api_diamond_logs():
     logs = get_diamond_update_logs(limit)
     return jsonify({"ok": True, "logs": logs})
 
+# ── API: Automation Toggle ─────────────────────────────────
+
+@app.route("/api/automation/status")
+@login_required
+def api_automation_status():
+    enabled = get_automation_enabled()
+    from database import get_connection
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT paused_by, paused_at FROM automation_settings ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    paused_by = row["paused_by"] if row else None
+    paused_at = row["paused_at"] if row else None
+    return jsonify({"ok": True, "enabled": enabled, "paused_by": paused_by, "paused_at": paused_at})
+
+
+@app.route("/api/automation/toggle", methods=["POST"])
+@editor_required
+def api_automation_toggle():
+    if request.headers.get("X-CSRF-Token") != session.get("csrf_token"):
+        return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
+    current = get_automation_enabled()
+    new_state = not current
+    username = session.get("username", "unknown")
+    set_automation_enabled(new_state, username)
+    enabled = get_automation_enabled()
+    from database import get_connection
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT paused_by, paused_at FROM automation_settings ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    paused_by = row["paused_by"] if row else None
+    paused_at = row["paused_at"] if row else None
+    return jsonify({"ok": True, "enabled": enabled, "paused_by": paused_by, "paused_at": paused_at})
 
 # ── Run ──────────────────────────────────────────────────
 

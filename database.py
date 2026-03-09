@@ -147,6 +147,15 @@ def init_db():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS automation_settings (
+            id                   SERIAL PRIMARY KEY,
+            automation_enabled   INTEGER NOT NULL DEFAULT 1,
+            paused_by            TEXT,
+            paused_at            TEXT
+        )
+    """)
+
     conn.commit()
 
     # Seed default users if not present
@@ -533,4 +542,43 @@ def delete_generated_file_record(filename):
     c.close()
     conn.close()
     return rowcount > 0
+
+
+# ── Automation Settings ───────────────────────────────────────────────
+
+def get_automation_enabled() -> bool:
+    """Returns True if automation is enabled (default: True when no row exists)."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT automation_enabled FROM automation_settings ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    if row is None:
+        return True
+    return bool(row["automation_enabled"])
+
+
+def set_automation_enabled(enabled: bool, username: str):
+    """Persist automation enabled/disabled state with who changed it and when."""
+    from datetime import timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_str = datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM automation_settings ORDER BY id DESC LIMIT 1")
+    existing = c.fetchone()
+    if existing:
+        c.execute(
+            "UPDATE automation_settings SET automation_enabled=%s, paused_by=%s, paused_at=%s WHERE id=%s",
+            (1 if enabled else 0, username if not enabled else None, now_str if not enabled else None, existing["id"])
+        )
+    else:
+        c.execute(
+            "INSERT INTO automation_settings (automation_enabled, paused_by, paused_at) VALUES (%s, %s, %s)",
+            (1 if enabled else 0, username if not enabled else None, now_str if not enabled else None)
+        )
+    conn.commit()
+    c.close()
+    conn.close()
 
