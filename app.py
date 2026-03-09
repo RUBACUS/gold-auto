@@ -626,7 +626,7 @@ def api_automation_status():
 @app.route("/api/automation/toggle", methods=["POST"])
 @editor_required
 def api_automation_toggle():
-    if request.headers.get("X-CSRF-Token") != session.get("csrf_token"):
+    if request.headers.get("X-CSRF-Token") != session.get("_csrf_token"):
         return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
     current = get_automation_enabled()
     new_state = not current
