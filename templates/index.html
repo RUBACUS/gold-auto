@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>TaaraLaxmii – Gold Price Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
@@ -70,7 +72,6 @@
                 <div class="htab active" data-target="htab-overview">Overview</div>
                 <div class="htab" data-target="htab-history">Rate History</div>
                 <div class="htab" data-target="htab-logs">Update Logs</div>
-                <div class="htab" data-target="htab-diamond-logs">Diamond Logs</div>
             </div>
 
             <!-- Overview Tab -->
@@ -100,14 +101,6 @@
                 </div>
             </div>
 
-            <!-- Diamond Logs Tab -->
-            <div class="hero-tab-content" id="htab-diamond-logs">
-                <div class="htab-panel">
-                    <div id="diamond-logs-table">
-                        <div class="empty-state">Loading…</div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Rate Strip -->
@@ -187,37 +180,15 @@
                 <button class="btn btn-dark" id="btn-update" onclick="runUpdate()">&#9654; Run Pricing</button>
                 <button class="btn btn-out" onclick="forceBaseline()" title="Set current IBJA rate as baseline without changing prices">&#8857; Set Baseline</button>
                 <button class="btn btn-gold" id="btn-save-config" onclick="saveConfig()">&#10003; Save Charts</button>
-                <span class="action-divider"></span>
                 <span id="config-status" style="font-size:0.72rem;color:var(--text-3)"></span>
             </div>
             <div class="action-section">
-                <span class="action-divider"></span>
                 <input type="file" id="file-input" accept=".xlsx,.csv" class="file-input-hidden" onchange="uploadFile()">
                 <button class="btn btn-gblue" onclick="document.getElementById('file-input').click()">&#11014; Upload CSV/XLSX</button>
                 <span id="active-file-info" style="font-size:0.72rem;color:var(--text-2)">Loading source file…</span>
             </div>
         </div>
 
-        <!-- Diamond Section -->
-        <div class="diamond-section">
-            <div class="ds-title">
-                <span>&#9670; Diamond Rate Update</span>
-                <span id="diamond-status" style="font-size:0.72rem"></span>
-            </div>
-            <div class="ds-row">
-                <div class="ds-field">
-                    <label>GH I1-I2 (₹/ct)</label>
-                    <input type="number" id="diamond-i1i2" placeholder="e.g. 39500" min="0" step="1">
-                </div>
-                <div class="ds-field">
-                    <label>GH SI (₹/ct)</label>
-                    <input type="number" id="diamond-si" placeholder="e.g. 49500" min="0" step="1">
-                </div>
-            </div>
-            <div class="ds-actions">
-                <button class="btn btn-green btn-sm" id="btn-diamond-update" onclick="runDiamondUpdate()">&#9670; Run Diamond Update</button>
-            </div>
-        </div>
         {% endif %}
 
         <!-- Tabs Section (Sheets + Uploads) -->

@@ -111,6 +111,7 @@ function updateTicker() {
     if (!track) return;
     var items = [];
     if (liveRates) {
+        if (liveRates["fine_gold"]) items.push("24KT: " + fmt(liveRates["fine_gold"]) + "/g");
         items.push("18KT: " + fmt(liveRates["18kt"]) + "/g");
         items.push("14KT: " + fmt(liveRates["14kt"]) + "/g");
         items.push("9KT: " + fmt(liveRates["9kt"]) + "/g");
@@ -140,8 +141,8 @@ async function fetchLiveRates() {
 
     liveRates = data.rates;
 
-    // Hero price block
-    document.getElementById("hero-price").textContent = fmt(liveRates["18kt"]);
+    // Hero price block – show 24KT (fine gold 999) rate
+    document.getElementById("hero-price").textContent = fmt(liveRates["fine_gold"] || liveRates["18kt"]);
     var sessionBadge = liveRates.session === "AM" ? "AM" : "PM";
     document.getElementById("hero-ts").textContent = sessionBadge + " session \u00b7 " + (liveRates.date || "\u2014") + " \u00b7 per gram, excl. GST";
 
@@ -205,6 +206,10 @@ function updateDelta() {
     var d9 = liveRates["9kt"] - (storedRate.rate_9kt || 0);
     var d14 = liveRates["14kt"] - storedRate.rate_14kt;
     var d18 = liveRates["18kt"] - storedRate.rate_18kt;
+    // Proportional 24KT delta (drive off 18KT change, scaled to fine-gold price)
+    var d24 = (liveRates["fine_gold"] && liveRates["18kt"])
+        ? Math.round((liveRates["fine_gold"] / liveRates["18kt"]) * d18)
+        : d18;
     var needUpdate = d9 !== 0 || d14 !== 0 || d18 !== 0;
 
     function cls(d) { return d > 0 ? "delta-positive" : d < 0 ? "delta-negative" : ""; }
@@ -217,11 +222,11 @@ function updateDelta() {
         ? '<span class="badge-sm badge-danger">Update Available</span>'
         : '<span class="badge-sm badge-success">Up to Date</span>';
 
-    // Hero change
+    // Hero change — show 24KT delta
     var hc = document.getElementById("hero-change");
     if (hc) {
-        hc.className = "price-change " + (d18 > 0 ? "up" : d18 < 0 ? "down" : "");
-        hc.textContent = (d18 > 0 ? "\u25B2 " : d18 < 0 ? "\u25BC " : "") + fmtDelta(d18) + " from baseline";
+        hc.className = "price-change " + (d24 > 0 ? "up" : d24 < 0 ? "down" : "");
+        hc.textContent = (d24 > 0 ? "\u25B2 " : d24 < 0 ? "\u25BC " : "") + fmtDelta(d24) + " from baseline";
     }
 
     // mc-badge
@@ -567,6 +572,10 @@ async function fetchActiveFile() {
     }
 }
 
+// == Icon helpers ==
+var _DL_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+var _TRASH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+
 // == Uploaded Files Tab ==
 
 async function fetchUploads() {
@@ -584,24 +593,24 @@ async function fetchUploads() {
         return;
     }
 
-    var html = '<div class="uf-table"><div class="uf-head"><span>#</span><span>Filename</span><span>Status</span><span>Uploaded</span><span>Actions</span></div>';
+    var html = '<div class="uf-table"><div class="uf-head"><span class="col-num">#</span><span class="col-name">Filename</span><span class="col-status">Status</span><span class="col-date">Uploaded</span><span class="col-actions">Actions</span></div><div class="uf-body">';
 
     data.uploads.forEach(function(u, i) {
         var statusBadge = u.is_active
             ? '<span class="badge-sm badge-success">Active</span>'
             : '<span class="badge-sm badge-muted">Used</span>';
         var deleteBtn = USER_ROLE === 'editor'
-            ? '<button class="btn btn-gdanger btn-sm" title="Delete" onclick="deleteUpload(\'' + u.filename.replace(/'/g, "\\'") + '\')">Del</button>'
+            ? '<button class="btn btn-gdanger btn-sm btn-icon" title="Delete" onclick="deleteUpload(\'' + u.filename.replace(/'/g, "\\'") + '\')">'+_TRASH_ICON+'</button>'
             : '';
         html += '<div class="uf-row' + (u.is_active ? ' uf-active' : '') + '">' +
-            '<span>' + (i + 1) + '</span>' +
-            '<span>' + (u.original_name || u.filename) + '</span>' +
-            '<span>' + statusBadge + '</span>' +
-            '<span>' + fmtDate(u.timestamp) + '</span>' +
-            '<span><div class="sh-actions"><a href="/api/upload/' + encodeURIComponent(u.filename) + '/download" class="btn btn-out btn-sm">DL</a>' + deleteBtn + '</div></span></div>';
+            '<span class="col-num">' + (i + 1) + '</span>' +
+            '<span class="col-name">' + (u.original_name || u.filename) + '</span>' +
+            '<span class="col-status">' + statusBadge + '</span>' +
+            '<span class="col-date">' + fmtDate(u.timestamp) + '</span>' +
+            '<span class="col-actions"><div class="sh-actions"><a href="/api/upload/' + encodeURIComponent(u.filename) + '/download" class="btn btn-out btn-sm btn-icon" title="Download">'+_DL_ICON+'</a>' + deleteBtn + '</div></span></div>';
     });
 
-    html += '</div>';
+    html += '</div></div>';
     container.innerHTML = html;
 }
 
@@ -632,23 +641,23 @@ async function fetchSheets() {
         return;
     }
 
-    var html = '<div class="sh-table"><div class="sh-head"><span>#</span><span>Filename</span><span>Size</span><span>Actions</span></div>';
+    var html = '<div class="sh-table"><div class="sh-head"><span class="col-num">#</span><span class="col-name">Filename</span><span class="col-size">Size</span><span class="col-actions">Actions</span></div><div class="sh-body">';
 
     data.sheets.forEach(function(s, i) {
         var isLatest = i === 0;
         var latestBadge = isLatest ? ' <span class="badge-sm badge-success">Latest</span>' : '';
         var deleteBtn = USER_ROLE === 'editor'
-            ? '<button class="btn btn-gdanger btn-sm" title="Delete" onclick="deleteSheet(\'' + s.filename.replace(/'/g, "\\'") + '\')">Del</button>'
+            ? '<button class="btn btn-gdanger btn-sm btn-icon" title="Delete" onclick="deleteSheet(\'' + s.filename.replace(/'/g, "\\'") + '\')">'+_TRASH_ICON+'</button>'
             : '';
 
         html += '<div class="sh-row">' +
-            '<span>' + (i + 1) + '</span>' +
-            '<span><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="sh-name-link">' + s.filename + '</a>' + latestBadge + '</span>' +
-            '<span>' + fmtSize(s.size_kb) + '</span>' +
-            '<span><div class="sh-actions"><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="btn btn-out btn-sm">DL</a>' + deleteBtn + '</div></span></div>';
+            '<span class="col-num">' + (i + 1) + '</span>' +
+            '<span class="col-name"><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="sh-name-link">' + s.filename + '</a>' + latestBadge + '</span>' +
+            '<span class="col-size">' + fmtSize(s.size_kb) + '</span>' +
+            '<span class="col-actions"><div class="sh-actions"><a href="/api/sheets/' + encodeURIComponent(s.filename) + '/download" class="btn btn-out btn-sm btn-icon" title="Download">'+_DL_ICON+'</a>' + deleteBtn + '</div></span></div>';
     });
 
-    html += '</div>';
+    html += '</div></div>';
     container.innerHTML = html;
 }
 
@@ -824,7 +833,6 @@ document.addEventListener("DOMContentLoaded", function() {
     fetchSheets();
     fetchHistory();
     fetchLogs();
-    fetchDiamondLogs();
     fetchUploads();
 
     if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {

@@ -39,7 +39,7 @@ header{position:sticky;top:0;z-index:100;background:var(--white);border-bottom:1
 .page-wrap{max-width:1420px;margin:0 auto;padding:20px 24px 48px;display:grid;grid-template-columns:1fr 320px;gap:20px}
 .main-col{display:flex;flex-direction:column;gap:16px}
 /* Alert */
-#alert-area{position:fixed;top:90px;right:24px;z-index:200;max-width:420px;width:100%}
+#alert-area{position:fixed;top:90px;right:24px;z-index:300;max-width:420px;width:calc(100% - 48px)}
 .tl-alert{padding:10px 16px;margin-bottom:8px;font-size:0.78rem;line-height:1.5;border:1px solid var(--border);background:var(--white);box-shadow:0 4px 16px rgba(0,0,0,0.1);display:flex;align-items:flex-start;gap:8px;animation:slideIn .25s ease}
 .tl-alert.success{border-left:3px solid var(--green)}.tl-alert.danger{border-left:3px solid var(--red)}
 .tl-alert.warning{border-left:3px solid #e67e22}.tl-alert.info{border-left:3px solid var(--blue)}
@@ -80,8 +80,8 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .htab:hover{color:var(--text-2)}.htab.active{color:var(--gold);border-bottom-color:var(--gold)}
 /* Hero Tab Content */
 .hero-tab-content{display:none}.hero-tab-content.active{display:block}
-.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:16px 20px;min-height:80px;max-height:340px;overflow-y:auto}
-.htab-panel .data-table{width:100%;border-collapse:collapse}
+.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:16px 20px;min-height:80px;max-height:340px;overflow-x:auto;overflow-y:auto}
+.htab-panel .data-table{width:100%;min-width:380px;border-collapse:collapse}
 .htab-panel .data-table th{font-size:0.65rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--white)}
 .htab-panel .data-table td{font-size:0.78rem;color:var(--text-2);padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
 .htab-panel .data-table tr:last-child td{border-bottom:none}
@@ -144,21 +144,32 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .tabs-nav{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
 .tab{padding:12px 16px;font-size:0.72rem;font-weight:500;color:var(--text-3);cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color .15s}
 .tab:hover{color:var(--text-2)}.tab.active{color:var(--gold);border-bottom-color:var(--gold)}
-.tabs-body{padding:0}.tab-panel{display:none;min-height:120px;max-height:340px;overflow-y:auto}.tab-panel.active{display:block}
+.tabs-body{padding:0}.tab-panel{display:none;min-height:120px}.tab-panel.active{display:block}
 /* Sheet Tables */
-.sh-table{width:100%}.sh-head{display:flex;align-items:center;padding:10px 16px;font-size:0.62rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;border-bottom:2px solid var(--border);background:var(--white);position:sticky;top:0}
-.sh-head span{flex:1}.sh-head span:last-child{text-align:right;flex:0 0 120px}
+.sh-table{width:100%}.sh-head{display:flex;align-items:center;padding:10px 16px;font-size:0.62rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;border-bottom:2px solid var(--border);background:var(--white)}
+.sh-body{max-height:280px;overflow-y:auto}
+.sh-head span{flex:1}.sh-head span:last-child{text-align:right;flex:0 0 100px}
 .sh-row{display:flex;align-items:center;padding:8px 16px;font-size:0.78rem;color:var(--text-2);border-bottom:1px solid var(--border)}
-.sh-row:hover{background:var(--bg)}.sh-row span{flex:1}.sh-row span:last-child{flex:0 0 120px;text-align:right}
+.sh-row:hover{background:var(--bg)}.sh-row span{flex:1}.sh-row span:last-child{flex:0 0 100px;text-align:right}
+/* Column width helpers for sh/uf tables */
+.col-num{flex:0 0 36px!important;min-width:0}
+.col-name{flex:3!important}
+.col-size{flex:1!important}
+.col-status{flex:1!important;min-width:70px}
+.col-date{flex:2!important}
+.col-actions{flex:0 0 84px!important;text-align:right}
 .sh-actions{display:flex;gap:6px;justify-content:flex-end}
 .sh-name-link{color:var(--blue);text-decoration:none;cursor:pointer;font-weight:500}
 .sh-name-link:hover{text-decoration:underline}
 /* Upload Files */
-.uf-table{width:100%}.uf-head{display:flex;align-items:center;padding:10px 16px;font-size:0.62rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;border-bottom:2px solid var(--border);background:var(--white);position:sticky;top:0}
-.uf-head span{flex:1}.uf-head span:last-child{text-align:right;flex:0 0 120px}
+.uf-table{width:100%}.uf-head{display:flex;align-items:center;padding:10px 16px;font-size:0.62rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;border-bottom:2px solid var(--border);background:var(--white)}
+.uf-body{max-height:280px;overflow-y:auto}
+.uf-head span{flex:1}.uf-head span:last-child{text-align:right;flex:0 0 100px}
 .uf-row{display:flex;align-items:center;padding:8px 16px;font-size:0.78rem;color:var(--text-2);border-bottom:1px solid var(--border)}
-.uf-row:hover{background:var(--bg)}.uf-row span{flex:1}.uf-row span:last-child{flex:0 0 120px;text-align:right}
+.uf-row:hover{background:var(--bg)}.uf-row span{flex:1}.uf-row span:last-child{flex:0 0 100px;text-align:right}
 .uf-active{background:var(--gold-bg)!important}
+/* Icon-only button variant */
+.btn-icon{padding:5px 8px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
 /* Diamond Section */
 .diamond-section{background:var(--white);border:1px solid var(--border);margin-top:18px}
 .ds-title{font-size:0.82rem;font-weight:600;color:var(--text-1);padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
@@ -198,9 +209,197 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .config-field input{width:100%;padding:6px 8px;font-size:0.78rem;border:1px solid var(--border);outline:none;background:var(--white);font-family:'Ubuntu Mono',monospace}
 .config-field input:focus{border-color:var(--gold);background:var(--gold-bg)}
 .config-actions{padding:10px 18px;border-top:1px solid var(--border);display:flex;gap:8px}
-/* Responsive */
-@media(max-width:1024px){.page-wrap{grid-template-columns:1fr}.live-feed{max-height:none;position:static}.bottom-layout{grid-template-columns:1fr}.rate-strip{grid-template-columns:1fr}}
-@media(max-width:680px){.header{flex-wrap:wrap;gap:8px;padding:10px 14px}.hero-top{grid-template-columns:1fr}.hero-tabs{overflow-x:auto}.tabs-nav{overflow-x:auto}.action-bar{flex-direction:column;align-items:stretch}.ds-row{flex-direction:column}.config-grid{grid-template-columns:1fr}}
+/* ================================================
+   RESPONSIVE — full coverage 360 px → 1920 px +
+   ================================================ */
+
+/* -- Base fluid guards (always active) ----------------------------------- */
+body{overflow-x:hidden}
+/* prevent main-col/sidebar cells from blowing out their grid track */
+.main-col,.live-feed{min-width:0}
+/* hero tabs & bottom tabs: always scrollable, hide scrollbar cosmetically */
+.hero-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.hero-tabs::-webkit-scrollbar{display:none}
+.tabs-nav{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.tabs-nav::-webkit-scrollbar{display:none}
+/* tab panel data-tables scroll horizontally on any narrow container */
+.htab-panel{overflow-x:auto}
+
+/* -- Very large monitors (≥ 1920 px) ------------------------------------- */
+@media(min-width:1920px){
+  html{font-size:16px}
+  .page-wrap{max-width:1800px;padding:28px 48px 64px}
+  .price-hero{font-size:3.1rem}
+  .live-feed{max-height:calc(100vh - 110px)}
+}
+
+/* -- Large desktop (1281 px – 1599 px): default layout, subtle tweaks ----- */
+@media(min-width:1281px) and (max-width:1599px){
+  .page-wrap{padding:20px 28px 52px}
+}
+
+/* -- Medium desktop / large laptop (1025 px – 1280 px) ------------------- */
+@media(min-width:1025px) and (max-width:1280px){
+  .page-wrap{grid-template-columns:1fr 290px;gap:16px;padding:18px 20px 48px}
+}
+
+/* -- Tablet landscape / small laptop (≤ 1024 px) ------------------------- */
+@media(max-width:1024px){
+  .page-wrap{grid-template-columns:1fr;padding:16px 18px 40px;gap:14px}
+  .live-feed{max-height:320px;position:static;top:auto}
+  .bottom-layout{grid-template-columns:1fr 1fr}
+  .rate-strip{grid-template-columns:repeat(3,1fr)}
+}
+
+/* -- Tablet portrait (≤ 768 px) ------------------------------------------ */
+@media(max-width:768px){
+  html{font-size:14px}
+
+  /* Header */
+  header{padding:0 16px;height:auto;min-height:52px;flex-wrap:wrap;
+         gap:6px;padding-top:8px;padding-bottom:8px}
+  .h-meta{display:none}
+  .h-left .vr{display:none}
+  #clock{display:none}
+  .user-chip{padding:3px 8px;gap:5px}
+
+  /* Page */
+  .page-wrap{padding:12px 14px 32px;gap:12px}
+
+  /* Hero */
+  .hero-panel{padding:16px 16px 0}
+  .hero-top{grid-template-columns:1fr;gap:16px}
+  .price-hero{font-size:2.2rem}
+  .htab{white-space:nowrap;padding:10px 14px}
+
+  /* Rate strip */
+  .rate-strip{grid-template-columns:1fr;gap:10px}
+
+  /* Layout */
+  .bottom-layout{grid-template-columns:1fr}
+
+  /* Action bar */
+  .action-bar{flex-direction:column;align-items:stretch;gap:10px}
+  .action-section{flex-wrap:wrap}
+  .action-divider{display:none}
+
+  /* Alert: move to bottom on mobile so it doesn't cover the header */
+  #alert-area{right:8px;left:8px;max-width:none;top:auto;bottom:16px;position:fixed}
+
+  /* Live feed */
+  .live-feed{max-height:260px}
+
+  /* Login card */
+  .login-card{padding:28px 20px;margin:0 16px}
+}
+
+/* -- Large phone (≤ 640 px) ---------------------------------------------- */
+@media(max-width:640px){
+  html{font-size:13.5px}
+
+  /* Header: hide brand text and status dot, keep logo + username + logout */
+  .brand{display:none}
+  .status-pill{display:none}
+  header{padding:8px 12px}
+
+  /* Page */
+  .page-wrap{padding:10px 12px 28px;gap:10px}
+
+  /* Hero */
+  .hero-panel{padding:12px 12px 0}
+  .price-hero{font-size:2rem}
+  .price-change{font-size:0.82rem}
+  .range-val{width:58px;font-size:0.72rem}
+
+  /* Hero tab tables: enforce min-width so inner data tables scroll properly */
+  .htab-panel .data-table{min-width:420px}
+
+  /* Hide date column on file tables */
+  .col-date{display:none!important}
+
+  /* Price chart inputs: go full width */
+  .pt .pt-input{width:100%}
+  .input-wrap{display:block;width:100%}
+  .input-wrap .pt-input{width:100%;padding-left:18px}
+
+  /* Config / diamond */
+  .config-grid{grid-template-columns:1fr}
+  .ds-row{flex-direction:column}
+
+  /* Table rows */
+  .sh-head,.uf-head,.sh-row,.uf-row{padding:8px 10px}
+
+  /* Bottom layout gap */
+  .bottom-layout{gap:12px}
+
+  /* Live feed */
+  .live-feed{max-height:220px}
+}
+
+/* -- Small phone (≤ 480 px) ---------------------------------------------- */
+@media(max-width:480px){
+  html{font-size:13px}
+
+  /* Header: hide role badge, shrink logout */
+  .role-badge{display:none}
+  .logout-btn{padding:3px 6px;font-size:0.65rem}
+
+  /* Page */
+  .page-wrap{padding:8px 10px 24px;gap:8px}
+  .hero-panel{padding:10px 10px 0}
+
+  /* Hero price */
+  .price-hero{font-size:1.75rem;letter-spacing:0}
+  .hero-top{gap:10px}
+
+  /* Rate cards */
+  .rc{padding:10px 12px}
+  .kt-val{font-size:0.62rem;padding:2px 6px}
+
+  /* Ticker */
+  .ticker{height:26px}
+  .ticker-item{font-size:0.62rem}
+
+  /* Tabs */
+  .htab{padding:8px 12px;font-size:0.65rem}
+  .tab{padding:9px 12px;font-size:0.65rem}
+
+  /* Table column sizing */
+  .col-num{flex:0 0 28px!important}
+  .col-actions{flex:0 0 70px!important}
+  .sh-head,.uf-head,.sh-row,.uf-row{padding:7px 8px}
+
+  /* Live feed */
+  .live-feed{max-height:180px}
+
+  /* Action section buttons: each section takes full row */
+  .action-section{width:100%;justify-content:flex-start}
+}
+
+/* -- Very small phone (≤ 360 px) ----------------------------------------- */
+@media(max-width:360px){
+  html{font-size:12.5px}
+  .price-hero{font-size:1.5rem}
+  .page-wrap{padding:6px 8px 20px;gap:6px}
+  .hero-panel{padding:8px 8px 0}
+  .htab-panel{padding:8px 8px}
+  .sh-head,.uf-head,.sh-row,.uf-row{padding:6px 8px}
+  .rc-val{font-size:1rem}
+}
+
+/* -- Touch devices: larger tap targets, prevent iOS input zoom ------------ */
+@media(hover:none) and (pointer:coarse){
+  .btn{min-height:40px}
+  .btn-sm{min-height:32px}
+  .htab{min-height:40px}
+  .tab{min-height:40px}
+  /* font-size ≥16px prevents auto-zoom on iOS Safari */
+  .pt .pt-input{min-height:38px;font-size:max(16px,0.78rem)}
+  .ds-field input,.ds-field select{min-height:38px;font-size:max(16px,0.78rem)}
+  .login-field input{font-size:max(16px,0.85rem)}
+  .logout-btn{min-height:32px;min-width:60px}
+}
+
 /* Login */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
 .login-card{background:var(--white);border:1px solid var(--border);padding:40px 36px;width:100%;max-width:380px}
