@@ -13,7 +13,10 @@ function fmtDelta(n) {
 
 function fmtDate(iso) {
     if (!iso) return "\u2014";
-    var d = new Date(iso);
+    // Treat timestamps without timezone info as UTC (server stores UTC)
+    var s = iso.trim();
+    if (!/[Zz]$/.test(s) && !/[+\-]\d{2}:\d{2}$/.test(s)) s += 'Z';
+    var d = new Date(s);
     return d.toLocaleString("en-IN", {
         day: "2-digit", month: "short", year: "numeric",
         hour: "2-digit", minute: "2-digit", hour12: true,

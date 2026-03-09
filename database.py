@@ -1,7 +1,7 @@
 import os
 import secrets
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import psycopg2
@@ -224,7 +224,7 @@ def save_rate(rate_14kt, rate_18kt, rate_fine, session, rate_date, rate_9kt=None
     c.execute(
         """INSERT INTO rate_history (timestamp, rate_14kt, rate_18kt, rate_fine, session, rate_date, rate_9kt)
            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (datetime.now().isoformat(), rate_14kt, rate_18kt, rate_fine, session, rate_date, rate_9kt),
+        (datetime.now(timezone.utc).isoformat(), rate_14kt, rate_18kt, rate_fine, session, rate_date, rate_9kt),
     )
     _cleanup_table(conn, "rate_history", _MAX_RATE_HISTORY)
     conn.commit()
@@ -263,7 +263,7 @@ def save_update_log(old_14, old_18, new_14, new_18, input_file, output_file,
            (timestamp, old_rate_14kt, old_rate_18kt, new_rate_14kt, new_rate_18kt,
             input_file, output_file, variants_updated, products_updated, status)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (datetime.now().isoformat(), old_14, old_18, new_14, new_18,
+        (datetime.now(timezone.utc).isoformat(), old_14, old_18, new_14, new_18,
          input_file, output_file, variants_updated, products_updated, status),
     )
     conn.commit()
@@ -288,7 +288,7 @@ def save_diamond_rates(rate_i1i2, rate_si):
     c = conn.cursor()
     c.execute(
         "INSERT INTO diamond_rate_history (timestamp, rate_i1i2, rate_si) VALUES (%s, %s, %s)",
-        (datetime.now().isoformat(), float(rate_i1i2), float(rate_si)),
+        (datetime.now(timezone.utc).isoformat(), float(rate_i1i2), float(rate_si)),
     )
     conn.commit()
     c.close()
@@ -327,7 +327,7 @@ def save_diamond_update_log(old_i1i2, old_si, new_i1i2, new_si,
            (timestamp, old_rate_i1i2, old_rate_si, new_rate_i1i2, new_rate_si,
             input_file, output_file, variants_updated, products_updated, status)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (datetime.now().isoformat(), old_i1i2, old_si, new_i1i2, new_si,
+        (datetime.now(timezone.utc).isoformat(), old_i1i2, old_si, new_i1i2, new_si,
          input_file, output_file, variants_updated, products_updated, status),
     )
     conn.commit()
@@ -361,7 +361,7 @@ def save_rate_config(diamond_i1i2, diamond_si, colorstone_rate,
             cmp_diamond_i1i2, cmp_diamond_si, cmp_colorstone_rate,
             cmp_huid_per_pc, cmp_certification, cmp_making_charge)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (datetime.now().isoformat(), float(diamond_i1i2), float(diamond_si),
+        (datetime.now(timezone.utc).isoformat(), float(diamond_i1i2), float(diamond_si),
          float(colorstone_rate), float(huid_per_pc), float(certification),
          float(making_charge), float(cmp_diamond_i1i2), float(cmp_diamond_si),
          float(cmp_colorstone_rate), float(cmp_huid_per_pc),
@@ -500,7 +500,7 @@ def save_uploaded_file(filename, original_name, file_data=None):
     c.execute("UPDATE uploaded_files SET is_active = 0")
     c.execute(
         "INSERT INTO uploaded_files (timestamp, filename, original_name, is_active, file_data) VALUES (%s, %s, %s, 1, %s)",
-        (datetime.now().isoformat(), filename, original_name,
+        (datetime.now(timezone.utc).isoformat(), filename, original_name,
          psycopg2.Binary(file_data) if file_data is not None else None),
     )
     conn.commit()
@@ -571,7 +571,7 @@ def save_generated_file(filename, file_data: bytes):
     c.execute("DELETE FROM generated_files WHERE filename = %s", (filename,))
     c.execute(
         "INSERT INTO generated_files (timestamp, filename, file_data, size_bytes) VALUES (%s, %s, %s, %s)",
-        (datetime.now().isoformat(), filename, psycopg2.Binary(file_data), len(file_data)),
+        (datetime.now(timezone.utc).isoformat(), filename, psycopg2.Binary(file_data), len(file_data)),
     )
     conn.commit()
     c.close()
