@@ -137,7 +137,7 @@
             </div>
         </div>
 
-        {% if user.role == 'editor' %}
+        {% if user.role in ('editor', 'viewer') %}
         <!-- Price Chart Table (Variant Config) -->
         <div class="bottom-layout">
             <div class="pt">
@@ -153,12 +153,12 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-i1i2" placeholder="39500" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-si" placeholder="49500" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-colorstone" placeholder="1500" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-huid" placeholder="100" min="0" step="10"></div></td></tr>
-                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-cert" placeholder="500" min="0" step="50"></div></td></tr>
-                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-making" placeholder="2500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-i1i2" placeholder="39500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-si" placeholder="49500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-colorstone" placeholder="1500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-huid" placeholder="100" min="0" step="10" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-cert" placeholder="500" min="0" step="50" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cfg-making" placeholder="2500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -175,17 +175,18 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-i1i2" placeholder="100000" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-si" placeholder="125000" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-colorstone" placeholder="1500" min="0" step="100"></div></td></tr>
-                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-huid" placeholder="100" min="0" step="10"></div></td></tr>
-                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-cert" placeholder="500" min="0" step="50"></div></td></tr>
-                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-making" placeholder="2500" min="0" step="100"></div></td></tr>
+                        <tr><td class="row-label">GH I1-I2 (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-i1i2" placeholder="100000" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">GH SI (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-si" placeholder="125000" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Colorstone (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-colorstone" placeholder="1500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">HUID (₹/pc)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-huid" placeholder="100" min="0" step="10" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Certification (₹/ct)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-cert" placeholder="500" min="0" step="50" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
+                        <tr><td class="row-label">Making Charge (₹/g)</td><td><div class="input-wrap"><input type="number" class="pt-input" id="cmp-making" placeholder="2500" min="0" step="100" {% if user.role == 'viewer' %}readonly{% endif %}></div></td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
+        {% if user.role == 'editor' %}
         <!-- Action Bar -->
         <div class="action-bar" style="background:var(--white);border:1px solid var(--border);margin-top:18px">
             <div class="action-section">
@@ -200,6 +201,7 @@
                 <span id="active-file-info" style="font-size:0.72rem;color:var(--text-2)">Loading source file…</span>
             </div>
         </div>
+        {% endif %}
 
         {% endif %}
 

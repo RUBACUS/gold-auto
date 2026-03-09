@@ -1061,8 +1061,10 @@ document.addEventListener("DOMContentLoaded", function() {
     fetchUploads();
     loadAutomationStatus();
 
-    if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {
+    if (typeof USER_ROLE !== "undefined" && (USER_ROLE === "editor" || USER_ROLE === "viewer")) {
         fetchConfig();
+    }
+    if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {
         fetchActiveFile();
     }
 

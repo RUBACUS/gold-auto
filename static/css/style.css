@@ -140,6 +140,8 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .pt .pt-input{width:80px;padding:4px 6px;font-size:0.78rem;font-family:'Ubuntu Mono',monospace;border:1px solid var(--border);outline:none;background:var(--white)}
 .pt .pt-input:focus{border-color:var(--gold);background:var(--gold-bg)}
 .pt .pt-input:disabled{background:var(--surface);color:var(--text-3)}
+.pt .pt-input[readonly]{background:var(--surface);color:var(--text-2);cursor:default;border-color:var(--border)}
+.pt .pt-input[readonly]:focus{border-color:var(--border);background:var(--surface)}
 .input-wrap{position:relative;display:inline-block}
 .input-wrap .pt-input{padding-left:14px}
 .input-wrap::before{content:'₹';position:absolute;left:5px;top:50%;transform:translateY(-50%);font-size:0.72rem;color:var(--text-3)}
