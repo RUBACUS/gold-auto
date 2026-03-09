@@ -59,17 +59,29 @@ def current_session():
 
 # ── Telegram ──────────────────────────────────────────────────
 
+# Support multiple recipients: TELEGRAM_CHAT_ID can be a single ID or
+# comma-separated list, e.g. "-1001234567890,8202274742"
+_TELEGRAM_CHAT_IDS = [
+    cid.strip()
+    for cid in (TELEGRAM_CHAT_ID or "").split(",")
+    if cid.strip()
+]
+
 def send_telegram(message):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML",
-        }, timeout=15)
-        print(f"[{_ts()}] [Telegram] Sent: {message[:80]}...")
-    except Exception as e:
-        print(f"[{_ts()}] [Telegram] FAILED to send alert: {e}")
+    if not TELEGRAM_BOT_TOKEN or not _TELEGRAM_CHAT_IDS:
+        print(f"[{_ts()}] [Telegram] Not configured — skipping.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    for chat_id in _TELEGRAM_CHAT_IDS:
+        try:
+            requests.post(url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "HTML",
+            }, timeout=15)
+            print(f"[{_ts()}] [Telegram] Sent to {chat_id}: {message[:80]}...")
+        except Exception as e:
+            print(f"[{_ts()}] [Telegram] FAILED to send to {chat_id}: {e}")
 
 
 def _flask_session():
