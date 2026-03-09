@@ -18,8 +18,7 @@ from shopify_push import push_prices
 FLASK_APP_URL = os.environ.get("FLASK_APP_URL", "").rstrip("/")
 FLASK_EDITOR_USER = os.environ.get("FLASK_EDITOR_USERNAME")
 FLASK_EDITOR_PASS = os.environ.get("FLASK_EDITOR_PASSWORD")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# Telegram config imported from utils
 
 RATE_WAIT_TIMEOUT_HOURS = int(os.environ.get("RATE_WAIT_TIMEOUT_HOURS", "2"))
 RATE_CHECK_INTERVAL_MINUTES = int(os.environ.get("RATE_CHECK_INTERVAL_MINUTES", "5"))
@@ -41,69 +40,14 @@ RATE_SANITY = {
 }
 
 
-# ── Helpers ───────────────────────────────────────────────────
-
-def _ts():
-    return datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+# ── Helpers (imported from shared utils) ──────────────────────
+from utils import _ts, now_ist, current_session, send_telegram, flask_session
 
 
-def now_ist():
-    return datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
 
 
-def current_session():
-    """Returns 'AM' if before 2 PM IST, else 'PM'."""
-    hour = datetime.now(IST).hour
-    return "AM" if hour < 14 else "PM"
 
 
-# ── Telegram ──────────────────────────────────────────────────
-
-# Support multiple recipients: TELEGRAM_CHAT_ID can be a single ID or
-# comma-separated list, e.g. "-1001234567890,8202274742"
-_TELEGRAM_CHAT_IDS = [
-    cid.strip()
-    for cid in (TELEGRAM_CHAT_ID or "").split(",")
-    if cid.strip()
-]
-
-def send_telegram(message):
-    if not TELEGRAM_BOT_TOKEN or not _TELEGRAM_CHAT_IDS:
-        print(f"[{_ts()}] [Telegram] Not configured — skipping.")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    for chat_id in _TELEGRAM_CHAT_IDS:
-        try:
-            requests.post(url, json={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-            }, timeout=15)
-            print(f"[{_ts()}] [Telegram] Sent to {chat_id}: {message[:80]}...")
-        except Exception as e:
-            print(f"[{_ts()}] [Telegram] FAILED to send to {chat_id}: {e}")
-
-
-def _flask_session():
-    """Create an authenticated Flask session and return (session, csrf_token)."""
-    session = requests.Session()
-
-    login_resp = session.post(
-        f"{FLASK_APP_URL}/api/auth/login",
-        json={"username": FLASK_EDITOR_USER, "password": FLASK_EDITOR_PASS},
-        timeout=20,
-    )
-    if login_resp.status_code != 200:
-        raise Exception(f"Flask login failed: HTTP {login_resp.status_code} — {login_resp.text[:200]}")
-
-    # Visit index page to generate CSRF token (also deactivates stale uploads — fine before upload)
-    page_resp = session.get(f"{FLASK_APP_URL}/", timeout=20, allow_redirects=True)
-    csrf_token = None
-    m = re.search(r'const\s+CSRF_TOKEN\s*=\s*"([a-f0-9]+)"', page_resp.text)
-    if m:
-        csrf_token = m.group(1)
-
-    return session, csrf_token
 
 
 # ── Stage 1 — Wait for Fresh IBJA Rates ──────────────────────
@@ -215,7 +159,7 @@ def stage3_run_pricing(csv_path):
         raise Exception(f"Flask app is unreachable: {e}")
 
     # Authenticate and get CSRF token
-    session, csrf_token = _flask_session()
+    session, csrf_token = flask_session()
 
     headers = {}
     if csrf_token:
@@ -280,29 +224,41 @@ def stage3_run_pricing(csv_path):
 
 def stage4_push_prices(output_csv):
     print(f"\n[{_ts()}] [Stage 4] Pushing prices to Shopify via GraphQL...")
-    success, variants, failed = push_prices(output_csv)
-    return success, variants, failed
+    success, variants, failed, summary = push_prices(output_csv)
+    return success, variants, failed, summary
 
 
 # ── Stage 5 — Telegram Notification ──────────────────────────
 
 def stage5_notify(rates, row_count, variants_done, products_done,
-                  push_success, failed_products, duration_sec,
+                  push_success, failed_products, push_summary, duration_sec,
                   metaobject_ok=True):
     minutes = int(duration_sec // 60)
     seconds = int(duration_sec % 60)
     session_name = rates["session"]
     failures = len(failed_products)
+    total_products = (push_summary or {}).get("total_products") or (push_success + failures)
+    failure_pct = (push_summary or {}).get("failure_percent")
+    if failure_pct is None:
+        failure_pct = (failures * 100.0 / total_products) if total_products else 0.0
+    threshold_pct = (push_summary or {}).get("failure_threshold_percent", 5.0)
+    is_critical = bool((push_summary or {}).get("is_critical", failure_pct > threshold_pct))
 
     if failures == 0:
         status_icon = "✅"
         status_line = "All products updated successfully."
-    elif failures < push_success * 0.05:
+    elif not is_critical:
         status_icon = "⚠️"
-        status_line = f"{failures} products had partial failures (see below)."
+        status_line = (
+            f"{failures} products had partial failures "
+            f"({failure_pct:.2f}% of {total_products}, threshold {threshold_pct:.2f}%)."
+        )
     else:
         status_icon = "❌"
-        status_line = f"CRITICAL: {failures} products failed to update!"
+        status_line = (
+            f"CRITICAL: {failures} products failed to update "
+            f"({failure_pct:.2f}% of {total_products}, threshold {threshold_pct:.2f}%)!"
+        )
 
     rate_display_line = "🔢 Rate Display: Updated" if metaobject_ok else "🔢 Rate Display: Failed — check logs"
 
@@ -461,7 +417,7 @@ def main():
 
     # ── Stage 4
     try:
-        push_success, variants_pushed, failed_products = stage4_push_prices(output_csv)
+        push_success, variants_pushed, failed_products, push_summary = stage4_push_prices(output_csv)
     except Exception as e:
         msg = (f"❌ <b>Automation FAILED — Stage 4 (Shopify Price Push)</b>\n"
                f"Error: {e}\nTime: {now_ist()}")
@@ -476,7 +432,7 @@ def main():
     duration = time.time() - start_time
     try:
         stage5_notify(rates, row_count, variants_done, products_done,
-                      push_success, failed_products, duration,
+                      push_success, failed_products, push_summary, duration,
                       metaobject_ok=metaobject_ok)
     except Exception as e:
         print(f"[{_ts()}] [Main] Stage 5 notification error (non-fatal): {e}")

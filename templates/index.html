@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>TaaraLaxmii – Gold Price Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}?v=20260309d" rel="stylesheet">
 </head>
 <body>
 
@@ -89,8 +89,10 @@
             <!-- Overview Tab -->
             <div class="hero-tab-content active" id="htab-overview">
                 <div class="htab-panel">
-                    <div id="overview-content">
-                        <div class="empty-state">Loading overview…</div>
+                    <div id="overview-content" class="overview-dev-box">
+                        <div class="skeleton-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+                        <div class="skeleton skeleton-line w80"></div>
+                        <div class="skeleton skeleton-line w60"></div>
                     </div>
                 </div>
             </div>
@@ -99,7 +101,9 @@
             <div class="hero-tab-content" id="htab-history">
                 <div class="htab-panel">
                     <div id="history-table">
-                        <div class="empty-state">Loading…</div>
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line w80"></div>
+                        <div class="skeleton skeleton-line w60"></div>
                     </div>
                 </div>
             </div>
@@ -108,7 +112,9 @@
             <div class="hero-tab-content" id="htab-logs">
                 <div class="htab-panel">
                     <div id="logs-table">
-                        <div class="empty-state">Loading…</div>
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line w80"></div>
+                        <div class="skeleton skeleton-line w60"></div>
                     </div>
                 </div>
             </div>
@@ -192,6 +198,7 @@
             <div class="action-section">
                 <button class="btn btn-dark" id="btn-update" onclick="runUpdate()">&#9654; Run Pricing</button>
                 <button class="btn btn-out" onclick="forceBaseline()" title="Set current IBJA rate as baseline without changing prices">&#8857; Set Baseline</button>
+                <button class="btn btn-out" onclick="document.getElementById('manual-rate-panel').style.display=''" title="Manually enter gold rates when IBJA is down">&#9998; Manual Rate</button>
                 <button class="btn btn-gold" id="btn-save-config" onclick="saveConfig()">&#10003; Save Charts</button>
                 <span id="config-status" style="font-size:0.72rem;color:var(--text-3)"></span>
             </div>
@@ -201,8 +208,47 @@
                 <span id="active-file-info" style="font-size:0.72rem;color:var(--text-2)">Loading source file…</span>
             </div>
         </div>
+        <!-- Progress bar for pricing runs -->
+        <div id="pricing-progress" style="display:none;margin-top:4px;padding:0 2px">
+            <div style="height:3px;border-radius:2px;background:var(--border);overflow:hidden">
+                <div id="pricing-progress-bar" style="height:100%;width:0%;background:var(--gold);transition:width 0.4s ease"></div>
+            </div>
+            <div id="pricing-progress-text" style="font-size:0.68rem;color:var(--text-3);margin-top:2px;text-align:center"></div>
+        </div>
         {% endif %}
 
+        {% endif %}
+
+        {% if user.role == 'editor' %}
+        <!-- Manual Rate Override (fallback when IBJA is down) -->
+        <div class="pt" id="manual-rate-panel" style="margin-top:18px;display:none">
+            <div class="pt-head">
+                <span>Manual Rate Override</span>
+                <span class="badge-sm badge-danger">Fallback</span>
+                <button class="btn btn-out btn-sm" onclick="document.getElementById('manual-rate-panel').style.display='none'" style="margin-left:auto">✕ Close</button>
+            </div>
+            <p style="font-size:0.75rem;color:var(--text-3);margin:8px 0 12px">Use this when IBJA website is unreachable. Enter gold rates manually to set as baseline.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end">
+                <div style="flex:1;min-width:120px">
+                    <label style="font-size:0.7rem;color:var(--text-3)">18KT (₹/g) *</label>
+                    <input type="number" class="pt-input" id="mr-18kt" placeholder="e.g. 6500" min="0" step="1">
+                </div>
+                <div style="flex:1;min-width:120px">
+                    <label style="font-size:0.7rem;color:var(--text-3)">14KT (₹/g) *</label>
+                    <input type="number" class="pt-input" id="mr-14kt" placeholder="e.g. 5000" min="0" step="1">
+                </div>
+                <div style="flex:1;min-width:120px">
+                    <label style="font-size:0.7rem;color:var(--text-3)">9KT (₹/g)</label>
+                    <input type="number" class="pt-input" id="mr-9kt" placeholder="optional" min="0" step="1">
+                </div>
+                <div style="flex:1;min-width:120px">
+                    <label style="font-size:0.7rem;color:var(--text-3)">24KT / Fine Gold</label>
+                    <input type="number" class="pt-input" id="mr-fine" placeholder="optional" min="0" step="1">
+                </div>
+                <button class="btn btn-gold" id="btn-manual-rate" onclick="submitManualRate()">Set Manual Rate</button>
+            </div>
+            <div id="manual-rate-status" style="font-size:0.75rem;margin-top:8px"></div>
+        </div>
         {% endif %}
 
         <!-- Tabs Section (Sheets + Uploads) -->
@@ -214,12 +260,15 @@
             <div class="tabs-body">
                 <div class="tab-panel active" id="panel-sheets">
                     <div id="sheets-table">
-                        <div class="empty-state">Loading sheets…</div>
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line w80"></div>
+                        <div class="skeleton skeleton-line w60"></div>
                     </div>
                 </div>
                 <div class="tab-panel" id="panel-uploads">
                     <div id="uploads-table">
-                        <div class="empty-state">Loading…</div>
+                        <div class="skeleton skeleton-line"></div>
+                        <div class="skeleton skeleton-line w80"></div>
                     </div>
                 </div>
             </div>
@@ -247,7 +296,8 @@
                 </div>
             </div>
             <div class="um-body" id="um-body">
-                <div class="empty-state">Loading users…</div>
+                <div class="skeleton skeleton-line w80"></div>
+                <div class="skeleton skeleton-line w60"></div>
             </div>
         </div>
         {% endif %}
@@ -273,6 +323,6 @@
     const CSRF_TOKEN = "{{ csrf_token() }}";
     const CURRENT_USER_ID = {{ (user.id if user else none) | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v=20260309"></script>
 </body>
 </html>

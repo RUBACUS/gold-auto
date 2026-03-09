@@ -282,25 +282,34 @@ def update_excel_prices(gold_rates, diamond_rates=None, suffix="UNK",
         if len(rows) < 2:
             raise ValueError("CSV file has no data rows")
 
-        # Detect columns from header row (fall back to hardcoded positions)
+        # Detect columns from header row and fail fast if required headers are missing.
         detected = _detect_csv_columns(rows[0])
 
-        c_handle = detected.get("handle", COL_HANDLE - 1)
-        c_opt2 = detected.get("opt2_value", COL_OPT2_VALUE - 1)
-        c_opt3 = detected.get("opt3_value", COL_OPT3_VALUE - 1)
-        c_price = detected.get("variant_price", COL_VARIANT_PRICE - 1)
-        c_cmp = detected.get("compare_at_price", COL_COMPARE_AT_PRICE - 1)
-        c_14wt = detected.get("14kt_weight", COL_14KT_WEIGHT - 1)
-        c_18wt = detected.get("18kt_weight", COL_18KT_WEIGHT - 1)
-        c_9wt = detected.get("9kt_weight", COL_9KT_WEIGHT - 1)
-        c_diam = detected.get("diamond_weight", COL_DIAMOND_WEIGHT - 1)
-        c_gem = detected.get("gemstone_weight", COL_GEMSTONE_WEIGHT - 1)
+        required_cols = [
+            "handle", "opt2_value", "opt3_value", "variant_price", "compare_at_price",
+            "14kt_weight", "18kt_weight", "9kt_weight", "diamond_weight", "gemstone_weight",
+        ]
+        missing = [k for k in required_cols if k not in detected]
+        if missing:
+            raise ValueError(
+                "CSV header mapping failed; missing required columns: " + ", ".join(missing)
+            )
+
+        c_handle = detected["handle"]
+        c_opt2 = detected["opt2_value"]
+        c_opt3 = detected["opt3_value"]
+        c_price = detected["variant_price"]
+        c_cmp = detected["compare_at_price"]
+        c_14wt = detected["14kt_weight"]
+        c_18wt = detected["18kt_weight"]
+        c_9wt = detected["9kt_weight"]
+        c_diam = detected["diamond_weight"]
+        c_gem = detected["gemstone_weight"]
 
         max_col = max(c_handle, c_opt2, c_opt3, c_price, c_cmp,
                       c_14wt, c_18wt, c_9wt, c_diam, c_gem)
 
-        if detected:
-            logging.info(f"CSV columns detected from headers: {detected}")
+        logging.info(f"CSV columns detected from headers: {detected}")
 
         # Pass 1 – build weight maps
         product_weights = {}

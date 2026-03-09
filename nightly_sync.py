@@ -1,67 +1,17 @@
 import os
-import re
 import sys
 import csv
 import io
 import requests
-from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
-IST = timezone(timedelta(hours=5, minutes=30))
-
 from shopify_export import fetch_fresh_shopify_csv
-
-FLASK_APP_URL = os.environ.get("FLASK_APP_URL", "").rstrip("/")
-FLASK_EDITOR_USER = os.environ.get("FLASK_EDITOR_USERNAME")
-FLASK_EDITOR_PASS = os.environ.get("FLASK_EDITOR_PASSWORD")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+from utils import _ts, now_ist as _now_ist, send_telegram, flask_session, FLASK_APP_URL
 
 
-def _ts():
-    return datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
 
-
-def _now_ist():
-    return datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
-
-
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": msg,
-            "parse_mode": "HTML",
-        }, timeout=15)
-        print(f"[{_ts()}] [Nightly Sync] Telegram sent: {msg[:80]}...")
-    except Exception as e:
-        print(f"[{_ts()}] [Nightly Sync] Telegram FAILED: {e}")
-
-
-def _flask_session():
-    """Create an authenticated Flask session and return (session, csrf_token)."""
-    session = requests.Session()
-
-    # Login
-    login_resp = session.post(
-        f"{FLASK_APP_URL}/api/auth/login",
-        json={"username": FLASK_EDITOR_USER, "password": FLASK_EDITOR_PASS},
-        timeout=20,
-    )
-    if login_resp.status_code != 200:
-        raise Exception(f"Flask login failed: HTTP {login_resp.status_code}")
-
-    # Visit index page to generate CSRF token
-    page_resp = session.get(f"{FLASK_APP_URL}/", timeout=20, allow_redirects=True)
-    csrf_token = None
-    m = re.search(r'const\s+CSRF_TOKEN\s*=\s*"([a-f0-9]+)"', page_resp.text)
-    if m:
-        csrf_token = m.group(1)
-
-    return session, csrf_token
 
 
 def get_current_active_row_count():
@@ -71,7 +21,7 @@ def get_current_active_row_count():
     Falls back to 0 if unable to determine.
     """
     try:
-        session, _ = _flask_session()
+        session, _ = flask_session()
 
         # List generated sheets
         resp = session.get(f"{FLASK_APP_URL}/api/sheets", timeout=15)
@@ -128,7 +78,7 @@ def main():
     # If unable to determine old count (0), upload anyway as safe default
     if new_count > old_count:
         try:
-            session, csrf_token = _flask_session()
+            session, csrf_token = flask_session()
 
             headers = {}
             if csrf_token:

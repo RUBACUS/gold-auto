@@ -1,6 +1,30 @@
 import re
+import time
+import threading
 import requests
 from bs4 import BeautifulSoup
+
+# ── Rate Cache (60-second TTL) ───────────────────────────
+_cache_lock = threading.Lock()
+_cached_rates = None
+_cache_time = 0
+_CACHE_TTL = 60  # seconds
+
+
+def get_cached_rates(force_refresh=False):
+    """Return cached IBJA rates if fresh, otherwise scrape and cache."""
+    global _cached_rates, _cache_time
+    now = time.time()
+    if not force_refresh and _cached_rates and (now - _cache_time) < _CACHE_TTL:
+        return _cached_rates
+    with _cache_lock:
+        # Double-check after acquiring lock
+        if not force_refresh and _cached_rates and (time.time() - _cache_time) < _CACHE_TTL:
+            return _cached_rates
+        rates = scrape_ibja_rates()
+        _cached_rates = rates
+        _cache_time = time.time()
+        return rates
 
 _HEADERS = {
     "User-Agent": (
@@ -65,35 +89,40 @@ def scrape_ibja_rates():
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    text = soup.get_text()
+    raw_text = soup.get_text(" ", strip=True)
+    text = re.sub(r"\s+", " ", raw_text)
 
-    # Locate the rates section
-    section_start = text.find("Retail selling Rates")
-    if section_start == -1:
-        raise ValueError("Could not find 'Retail selling Rates' section on IBJA page")
+    # Pull session/date near the "Retail selling Rates" label if available.
+    context_match = re.search(r"Retail\s*selling\s*Rates.*?(\d{2}/\d{2}/\d{4}).*?\((AM|PM)\)", text, re.IGNORECASE)
+    if not context_match:
+        # Fallback: session/date may appear in reverse order on layout changes.
+        context_match = re.search(r"Retail\s*selling\s*Rates.*?\((AM|PM)\).*?(\d{2}/\d{2}/\d{4})", text, re.IGNORECASE)
 
-    section = text[section_start : section_start + 600]
+    session = "Unknown"
+    rate_date = "Unknown"
+    if context_match:
+        g1, g2 = context_match.group(1), context_match.group(2)
+        if re.fullmatch(r"\d{2}/\d{2}/\d{4}", g1):
+            rate_date, session = g1, g2.upper()
+        else:
+            session, rate_date = g1.upper(), g2
 
-    # Extract session (AM / PM)
-    session_match = re.search(r"\((AM|PM)\)", section)
-    session = session_match.group(1) if session_match else "Unknown"
+    # Extract individual rates from the full normalized page text.
+    def _extract(patterns):
+        for pattern in patterns:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                return int(m.group(1).replace(",", ""))
+        return None
 
-    # Extract date  (dd/mm/yyyy)
-    date_match = re.search(r"(\d{2}/\d{2}/\d{4})", section)
-    rate_date = date_match.group(1) if date_match else "Unknown"
-
-    # Extract individual rates
-    def _extract(pattern):
-        m = re.search(pattern, section)
-        if not m:
-            return None
-        return int(m.group(1).replace(",", ""))
-
-    fine_gold = _extract(r"Fine\s*Gold\s*\(999\)\s*:\s*.*?(\d[\d,]+)")
-    kt22 = _extract(r"22\s*KT\s*:\s*.*?(\d[\d,]+)")
-    kt20 = _extract(r"20\s*KT\s*:\s*.*?(\d[\d,]+)")
-    kt18 = _extract(r"18\s*KT\s*:\s*.*?(\d[\d,]+)")
-    kt14 = _extract(r"14\s*KT\s*:\s*.*?(\d[\d,]+)")
+    fine_gold = _extract([
+        r"Fine\s*Gold\s*\(\s*999\s*\)\s*[:\-]?\s*₹?\s*(\d[\d,]+)",
+        r"999\s*Fine\s*Gold\s*[:\-]?\s*₹?\s*(\d[\d,]+)",
+    ])
+    kt22 = _extract([r"22\s*KT\s*[:\-]?\s*₹?\s*(\d[\d,]+)"])
+    kt20 = _extract([r"20\s*KT\s*[:\-]?\s*₹?\s*(\d[\d,]+)"])
+    kt18 = _extract([r"18\s*KT\s*[:\-]?\s*₹?\s*(\d[\d,]+)"])
+    kt14 = _extract([r"14\s*KT\s*[:\-]?\s*₹?\s*(\d[\d,]+)"])
 
     if kt14 is None or kt18 is None or fine_gold is None:
         raise ValueError(

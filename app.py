@@ -2,10 +2,8 @@ import os
 import io
 import uuid
 import secrets
-import time
 import logging
 import threading
-from collections import defaultdict
 from datetime import datetime
 from functools import wraps
 
@@ -21,7 +19,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from scraper import scrape_ibja_rates
+from scraper import scrape_ibja_rates, get_cached_rates
 from database import (
     get_latest_rate, get_rate_history, get_update_logs, save_rate,
     get_diamond_update_logs,
@@ -33,6 +31,10 @@ from database import (
     get_all_generated_files, delete_generated_file_record,
     get_automation_enabled, set_automation_enabled,
     get_all_users, create_user, update_user, delete_user, get_user_by_id,
+    acquire_app_lock, release_app_lock,
+    is_ip_rate_limited, record_login_attempt,
+    save_audit_log, get_audit_logs,
+    save_price_snapshot, get_latest_snapshot, get_snapshot_data,
 )
 from update_prices import run_update, run_diamond_update, OUTPUT_DIR, get_source_file
 
@@ -61,23 +63,43 @@ if os.environ.get("FLASK_ENV") == "production":
 ALLOWED_EXTENSIONS = {".xlsx", ".csv"}
 _XLSX_MAGIC = b"PK"  # ZIP-based format signature
 
-# Simple lock to prevent concurrent updates (single-worker mode)
-_update_lock = threading.Lock()
+# Distributed lock to prevent concurrent updates across workers/instances
+UPDATE_LOCK_NAME = "pricing_update"
+UPDATE_LOCK_TTL_SECONDS = int(os.environ.get("UPDATE_LOCK_TTL_SECONDS", "1800"))
 
 # ── Rate Limiting ────────────────────────────────────────────────────
-_login_attempts = defaultdict(list)
 LOGIN_RATE_LIMIT = 5        # max attempts
 LOGIN_RATE_WINDOW = 300     # per 5 minutes (seconds)
 
 
 def _is_rate_limited(ip):
-    now = time.time()
-    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < LOGIN_RATE_WINDOW]
-    return len(_login_attempts[ip]) >= LOGIN_RATE_LIMIT
+    return is_ip_rate_limited(ip, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW)
 
 
 def _record_login_attempt(ip):
-    _login_attempts[ip].append(time.time())
+    record_login_attempt(ip)
+
+
+def _acquire_update_lock():
+    token = uuid.uuid4().hex
+    if acquire_app_lock(UPDATE_LOCK_NAME, token, UPDATE_LOCK_TTL_SECONDS):
+        return token
+    return None
+
+
+# ── Background Task Tracking ────────────────────────────────────────
+_tasks = {}          # task_id -> {"status": "running"|"done"|"error", "result": ..., "started": datetime}
+_tasks_lock = threading.Lock()
+
+
+def _set_task(task_id, status, result=None):
+    with _tasks_lock:
+        _tasks[task_id] = {"status": status, "result": result, "started": datetime.utcnow().isoformat()}
+
+
+def _get_task(task_id):
+    with _tasks_lock:
+        return _tasks.get(task_id)
 
 
 # ── Security Headers ────────────────────────────────────────────────
@@ -152,6 +174,11 @@ def _sanitize_error(e):
     return msg
 
 
+def _current_user():
+    """Return the username of the currently logged-in user, or 'system'."""
+    return (session.get("user") or {}).get("username", "system")
+
+
 # ── Auth helpers ─────────────────────────────────────────
 
 def login_required(f):
@@ -216,7 +243,8 @@ def index():
 @app.route("/api/auth/login", methods=["POST"])
 def api_login():
     # Rate limiting
-    client_ip = request.remote_addr
+    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    client_ip = xff or request.remote_addr or "unknown"
     if _is_rate_limited(client_ip):
         return jsonify({"ok": False, "error": "Too many login attempts. Try again later."}), 429
 
@@ -233,6 +261,7 @@ def api_login():
         return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
     session["user"] = user
+    save_audit_log(username, "login", f"Login from IP {client_ip}")
     return jsonify({"ok": True, "user": user})
 
 
@@ -249,13 +278,19 @@ def api_me():
     return jsonify({"ok": False}), 401
 
 
+@app.route("/api/csrf-token")
+@login_required
+def api_csrf_token():
+    return jsonify({"ok": True, "csrf_token": _get_csrf_token()})
+
+
 # ── API: Rates ───────────────────────────────────────────
 
 @app.route("/api/rates/current")
 @login_required
 def api_current_rates():
     try:
-        rates = scrape_ibja_rates()
+        rates = get_cached_rates()
         return jsonify({"ok": True, "rates": rates})
     except Exception as e:
         return jsonify({"ok": False, "error": _sanitize_error(e)}), 502
@@ -330,6 +365,7 @@ def api_set_config():
         vals["cmp_diamond_i1i2"], vals["cmp_diamond_si"], vals["cmp_colorstone_rate"],
         vals["cmp_huid_per_pc"], vals["cmp_certification"], cmp_making,
     )
+    save_audit_log(_current_user(), "config_update", "Rate configuration updated")
     return jsonify({"ok": True, "message": "Rate configuration saved successfully."})
 
 
@@ -338,30 +374,65 @@ def api_set_config():
 @app.route("/api/update/run", methods=["POST"])
 @editor_required
 def api_run_update():
-    acquired = _update_lock.acquire(blocking=False)
-    if not acquired:
+    lock_token = _acquire_update_lock()
+    if not lock_token:
         return jsonify({"ok": False, "error": "An update is already in progress."}), 409
 
-    try:
-        # Require a freshly uploaded file every time
-        upload = get_active_upload()
-        if not upload:
-            return jsonify({
-                "ok": False,
-                "error": "No file uploaded. Please upload a CSV/XLSX file before running pricing."
-            }), 400
+    # Require a freshly uploaded file every time
+    upload = get_active_upload()
+    if not upload:
+        release_app_lock(UPDATE_LOCK_NAME, lock_token)
+        return jsonify({
+            "ok": False,
+            "error": "No file uploaded. Please upload a CSV/XLSX file before running pricing."
+        }), 400
 
-        result = run_update()
+    task_id = uuid.uuid4().hex
+    username = _current_user()
+    _set_task(task_id, "running")
 
-        # Deactivate the upload after CSV generation — user must re-upload for next run
-        if result.get("status") == "updated":
-            deactivate_active_upload()
+    def _run_in_background():
+        try:
+            # Snapshot the last generated CSV before overwriting (for rollback)
+            import json as _json
+            all_gen = get_all_generated_files()
+            if all_gen:
+                last_gen = all_gen[0]
+                last_data = get_generated_file(last_gen["filename"])
+                if last_data:
+                    snap_payload = _json.dumps({
+                        "filename": last_gen["filename"],
+                        "csv_data": last_data.decode("utf-8", errors="replace"),
+                    }).encode("utf-8")
+                    save_price_snapshot(snap_payload)
 
-        return jsonify({"ok": True, **result})
-    except Exception as e:
-        return jsonify({"ok": False, "error": _sanitize_error(e)}), 500
-    finally:
-        _update_lock.release()
+            result = run_update()
+
+            if result.get("status") == "updated":
+                deactivate_active_upload()
+                save_audit_log(username, "pricing_run",
+                    f"Variants: {result.get('variants_updated', 0)}, Output: {result.get('output_file', '')}")
+
+            _set_task(task_id, "done", result)
+        except Exception as e:
+            _set_task(task_id, "error", {"error": _sanitize_error(e)})
+        finally:
+            release_app_lock(UPDATE_LOCK_NAME, lock_token)
+
+    t = threading.Thread(target=_run_in_background, daemon=True)
+    t.start()
+
+    return jsonify({"ok": True, "task_id": task_id, "message": "Pricing update started."})
+
+
+@app.route("/api/update/status/<task_id>")
+@login_required
+def api_update_status(task_id):
+    """Poll for the status of a background pricing task."""
+    task = _get_task(task_id)
+    if not task:
+        return jsonify({"ok": False, "error": "Task not found."}), 404
+    return jsonify({"ok": True, **task})
 
 
 @app.route("/api/update/force", methods=["POST"])
@@ -383,13 +454,53 @@ def api_force_baseline():
         return jsonify({"ok": False, "error": _sanitize_error(e)}), 500
 
 
+# ── API: Manual Rate Override ────────────────────────────
+
+@app.route("/api/rates/manual", methods=["POST"])
+@editor_required
+def api_manual_rate():
+    """Manually set gold rates when IBJA website is down."""
+    body = request.get_json(force=True, silent=True) or {}
+    rate_18kt = body.get("rate_18kt")
+    rate_14kt = body.get("rate_14kt")
+    rate_9kt = body.get("rate_9kt")
+    fine_gold = body.get("fine_gold")
+    session_name = body.get("session", "Manual")
+
+    if rate_18kt is None or rate_14kt is None:
+        return jsonify({"ok": False, "error": "rate_18kt and rate_14kt are required"}), 400
+
+    try:
+        rate_18kt = float(rate_18kt)
+        rate_14kt = float(rate_14kt)
+        rate_9kt = float(rate_9kt) if rate_9kt is not None else None
+        fine_gold = float(fine_gold) if fine_gold is not None else None
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "Rates must be valid numbers"}), 400
+
+    if rate_18kt <= 0 or rate_14kt <= 0:
+        return jsonify({"ok": False, "error": "Rates must be positive numbers"}), 400
+
+    from datetime import timezone as tz
+    rate_date = datetime.now(tz.utc).strftime("%d/%m/%Y")
+
+    save_rate(rate_14kt, rate_18kt, fine_gold, session_name, rate_date, rate_9kt=rate_9kt)
+    save_audit_log(_current_user(), "manual_rate",
+        f"18KT: {rate_18kt}, 14KT: {rate_14kt}, 9KT: {rate_9kt}, Fine: {fine_gold}")
+
+    return jsonify({
+        "ok": True,
+        "message": f"Manual rates saved — 18KT: ₹{rate_18kt:,.0f}, 14KT: ₹{rate_14kt:,.0f}",
+    })
+
+
 # ── API: Diamond Update ──────────────────────────────────
 
 @app.route("/api/diamond/update", methods=["POST"])
 @editor_required
 def api_diamond_update():
-    acquired = _update_lock.acquire(blocking=False)
-    if not acquired:
+    lock_token = _acquire_update_lock()
+    if not lock_token:
         return jsonify({"ok": False, "error": "An update is already in progress."}), 409
 
     try:
@@ -416,7 +527,7 @@ def api_diamond_update():
     except Exception as e:
         return jsonify({"ok": False, "error": _sanitize_error(e)}), 500
     finally:
-        _update_lock.release()
+        release_app_lock(UPDATE_LOCK_NAME, lock_token)
 
 
 # ── API: File Upload ─────────────────────────────────────
@@ -454,6 +565,7 @@ def api_upload_file():
 
     # Always store in PostgreSQL so the file survives redeploys
     save_uploaded_file(unique_name, f.filename, file_bytes)
+    save_audit_log(_current_user(), "file_upload", f"Uploaded {f.filename} as {unique_name}")
 
     return jsonify({
         "ok": True,
@@ -617,6 +729,58 @@ def api_diamond_logs():
     logs = get_diamond_update_logs(limit)
     return jsonify({"ok": True, "logs": logs})
 
+
+# ── API: Audit Log ───────────────────────────────────────
+
+@app.route("/api/audit/logs")
+@admin_required
+def api_audit_logs():
+    limit = request.args.get("limit", 100, type=int)
+    logs = get_audit_logs(limit)
+    return jsonify({"ok": True, "logs": logs})
+
+
+# ── API: Rollback ────────────────────────────────────────
+
+@app.route("/api/update/rollback", methods=["POST"])
+@editor_required
+def api_rollback():
+    """Rollback to the last pre-update snapshot (re-applies old generated CSV)."""
+    snap = get_latest_snapshot()
+    if not snap:
+        return jsonify({"ok": False, "error": "No snapshot available to rollback to."}), 404
+
+    snap_bytes = get_snapshot_data(snap["id"])
+    if not snap_bytes:
+        return jsonify({"ok": False, "error": "Snapshot data is missing."}), 404
+
+    import json
+    try:
+        snap_info = json.loads(snap_bytes)
+    except Exception:
+        return jsonify({"ok": False, "error": "Snapshot format is invalid."}), 500
+
+    # Restore the generated file
+    old_filename = snap_info.get("filename")
+    old_csv_data = snap_info.get("csv_data")
+    if old_filename and old_csv_data:
+        csv_bytes = old_csv_data.encode("utf-8")
+        save_generated_file(old_filename, csv_bytes)
+        # Also restore to disk
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        fpath = os.path.join(OUTPUT_DIR, old_filename)
+        with open(fpath, "wb") as fp:
+            fp.write(csv_bytes)
+
+    save_audit_log(_current_user(), "rollback",
+        f"Rolled back to snapshot #{snap['id']} (file: {old_filename})")
+
+    return jsonify({
+        "ok": True,
+        "message": f"Rolled back to snapshot #{snap['id']}.",
+        "snapshot_id": snap["id"],
+    })
+
 # ── API: User Management (admin only) ────────────────────────
 
 @app.route("/api/users")
@@ -641,6 +805,7 @@ def api_create_user():
     ok, result = create_user(username, password, role)
     if not ok:
         return jsonify({"ok": False, "error": result}), 409
+    save_audit_log(_current_user(), "user_create", f"Created user '{username}' with role '{role}'")
     return jsonify({"ok": True, "user": result})
 
 
@@ -667,6 +832,7 @@ def api_update_user(user_id):
     if not ok:
         return jsonify({"ok": False, "error": err}), 409
     updated = get_user_by_id(user_id)
+    save_audit_log(_current_user(), "user_update", f"Updated user id={user_id}")
     return jsonify({"ok": True, "user": updated})
 
 
@@ -684,6 +850,7 @@ def api_delete_user(user_id):
     if target["id"] == session["user"].get("id"):
         return jsonify({"ok": False, "error": "Cannot delete your own account"}), 400
     delete_user(user_id)
+    save_audit_log(_current_user(), "user_delete", f"Deleted user '{target['username']}' (id={user_id})")
     return jsonify({"ok": True})
 
 
@@ -692,13 +859,13 @@ def api_delete_user(user_id):
 @login_required
 def api_automation_status():
     enabled = get_automation_enabled()
-    from database import get_connection
+    from database import get_connection, put_connection
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT paused_by, paused_at FROM automation_settings ORDER BY id DESC LIMIT 1")
     row = c.fetchone()
     c.close()
-    conn.close()
+    put_connection(conn)
     paused_by = row["paused_by"] if row else None
     paused_at = row["paused_at"] if row else None
     return jsonify({"ok": True, "enabled": enabled, "paused_by": paused_by, "paused_at": paused_at})
@@ -711,16 +878,17 @@ def api_automation_toggle():
         return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
     current = get_automation_enabled()
     new_state = not current
-    username = session.get("username", "unknown")
+    username = (session.get("user") or {}).get("username") or "unknown"
     set_automation_enabled(new_state, username)
+    save_audit_log(username, "automation_toggle", f"Automation {'enabled' if new_state else 'disabled'}")
     enabled = get_automation_enabled()
-    from database import get_connection
+    from database import get_connection, put_connection
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT paused_by, paused_at FROM automation_settings ORDER BY id DESC LIMIT 1")
     row = c.fetchone()
     c.close()
-    conn.close()
+    put_connection(conn)
     paused_by = row["paused_by"] if row else None
     paused_at = row["paused_at"] if row else None
     return jsonify({"ok": True, "enabled": enabled, "paused_by": paused_by, "paused_at": paused_at})

@@ -72,7 +72,7 @@ def push_prices(csv_path):
     """
     Reads the generated pricing CSV, groups variants by product,
     and pushes all prices to Shopify via GraphQL.
-    Returns (products_updated, variants_updated, failed_products).
+    Returns (products_updated, variants_updated, failed_products, summary).
     """
     print(f"\n{'=' * 55}")
     print(f"[{_ts()}] [Push] Starting Shopify price push via GraphQL...")
@@ -150,7 +150,18 @@ def push_prices(csv_path):
         for fp in failed_products:
             print(f"       Product {fp['product_id']}: {fp['errors']}")
 
-    return success_count, variants_count, failed_products
+    failed_count = len(failed_products)
+    total_considered = success_count + failed_count
+    failure_pct = (failed_count * 100.0 / total_considered) if total_considered else 0.0
+    summary = {
+        "total_products": total_products,
+        "success_products": success_count,
+        "failed_products": failed_count,
+        "failure_percent": failure_pct,
+        "failure_threshold_percent": FAILURE_THRESHOLD_PERCENT,
+        "is_critical": failure_pct > FAILURE_THRESHOLD_PERCENT,
+    }
+    return success_count, variants_count, failed_products, summary
 
 
 if __name__ == "__main__":
@@ -158,5 +169,8 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python shopify_push.py <csv_path>")
         sys.exit(1)
-    s, v, f = push_prices(sys.argv[1])
-    print(f"Success: {s} products, {v} variants. Failed: {len(f)}")
+    s, v, f, summary = push_prices(sys.argv[1])
+    print(
+        f"Success: {s} products, {v} variants. Failed: {len(f)} "
+        f"({summary['failure_percent']:.2f}%)."
+    )

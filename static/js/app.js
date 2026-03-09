@@ -253,17 +253,14 @@ function drawSparkline() {
     var W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // Use rate history if available, else generate from current rate
+    // Use rate history if available; show flat line when only 1 data point
     var points = [];
     if (rateHistory.length > 1) {
         points = rateHistory.slice(-12).map(function(r) { return r.rate_18kt || 0; });
     } else if (liveRates) {
-        // Generate slight variations for visual effect
+        // Show flat line at current rate (no fake random variations)
         var base = liveRates["18kt"] || 0;
-        for (var i = 0; i < 8; i++) {
-            points.push(base + (Math.random() - 0.5) * base * 0.005);
-        }
-        points.push(base);
+        points = [base, base];
     }
     if (points.length < 2) return;
 
@@ -407,7 +404,8 @@ async function saveConfig() {
             showAlert('\u2717 ' + data.error, "danger");
         }
     } catch (e) {
-        showAlert('\u2717 ' + e.message, "danger");
+        showAlert('\u2717 Something went wrong while saving config.', "danger");
+        console.error("Save config error:", e);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '\u2713 Save Charts';
@@ -423,42 +421,105 @@ async function runUpdate() {
         return;
     }
 
+    if (!confirm("Run pricing update? This will recalculate all variant prices using current IBJA rates and push changes.")) return;
+
     var btn = document.getElementById("btn-update");
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span> Running\u2026';
 
     try {
-        var data = await api("/api/update/run", { method: "POST" });
+        var startData = await api("/api/update/run", { method: "POST" });
 
-        if (!data.ok) {
-            showAlert('<b>Error:</b> ' + data.error, "danger");
+        if (!startData.ok) {
+            showAlert('<b>Error:</b> ' + startData.error, "danger");
             return;
         }
 
-        if (data.status === "baseline_set") {
-            showAlert(data.message, "info");
-        } else if (data.status === "no_change") {
-            showAlert(data.message, "info");
-        } else if (data.status === "updated") {
-            showAlert(
-                '<b>Success!</b> ' + data.message + '<br>' +
-                '<small>18KT: ' + fmtDelta(data.delta_18kt) + '/g | ' +
-                '14KT: ' + fmtDelta(data.delta_14kt) + '/g | ' +
-                '9KT: ' + fmtDelta(data.delta_9kt) + '/g | ' +
-                'Output: <b>' + data.output_file + '</b></small>',
-                "success"
-            );
-            addLiveFeedItem("success", "Pricing run completed: " + data.output_file);
+        var taskId = startData.task_id;
+        if (!taskId) {
+            // Fallback for synchronous response (shouldn't happen)
+            _handleUpdateResult(startData);
+            return;
         }
 
-        await Promise.all([fetchStoredRate(), fetchSheets(), fetchLogs(), fetchUploads(), fetchActiveFile()]);
-        updateDelta();
+        addLiveFeedItem("info", "Pricing update started\u2026");
+        btn.innerHTML = '<span class="spin"></span> Processing\u2026';
+
+        // Poll for completion
+        var data = await _pollTask(taskId, btn);
+        _handleUpdateResult(data);
+
     } catch (e) {
-        showAlert('<b>Error:</b> ' + e.message, "danger");
+        showAlert('<b>Error:</b> Something went wrong. Please try again or check logs.', "danger");
+        console.error("Run Pricing error:", e);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '\u25B6 Run Pricing';
     }
+}
+
+function _handleUpdateResult(data) {
+    if (!data || data.status === "error") {
+        showAlert('<b>Error:</b> ' + ((data && data.result && data.result.error) || (data && data.error) || "Unknown error"), "danger");
+        return;
+    }
+
+    var r = data.result || data;
+    if (r.status === "baseline_set") {
+        showAlert(r.message, "info");
+    } else if (r.status === "no_change") {
+        showAlert(r.message, "info");
+    } else if (r.status === "updated") {
+        showAlert(
+            '<b>Success!</b> ' + r.message + '<br>' +
+            '<small>18KT: ' + fmtDelta(r.delta_18kt) + '/g | ' +
+            '14KT: ' + fmtDelta(r.delta_14kt) + '/g | ' +
+            '9KT: ' + fmtDelta(r.delta_9kt) + '/g | ' +
+            'Output: <b>' + r.output_file + '</b></small>',
+            "success"
+        );
+        addLiveFeedItem("success", "Pricing run completed: " + r.output_file);
+    }
+
+    Promise.all([fetchStoredRate(), fetchSheets(), fetchLogs(), fetchUploads(), fetchActiveFile()])
+        .then(function() { updateDelta(); });
+}
+
+async function _pollTask(taskId, btn) {
+    var maxAttempts = 120;  // 120 * 3s = 6 minutes max
+    var progWrap = document.getElementById("pricing-progress");
+    var progBar = document.getElementById("pricing-progress-bar");
+    var progText = document.getElementById("pricing-progress-text");
+    if (progWrap) { progWrap.style.display = ""; progBar.style.width = "5%"; progText.textContent = "Starting pricing engine\u2026"; }
+
+    for (var i = 0; i < maxAttempts; i++) {
+        await new Promise(function(r) { setTimeout(r, 3000); });
+        var pct = Math.min(5 + Math.round((i / maxAttempts) * 90), 95);
+        if (progBar) progBar.style.width = pct + "%";
+        if (progText) {
+            var stages = ["Scraping live rates\u2026", "Calculating prices\u2026", "Generating output\u2026", "Finalizing\u2026"];
+            progText.textContent = stages[Math.min(Math.floor(i / 5), stages.length - 1)];
+        }
+        try {
+            var resp = await api("/api/update/status/" + taskId);
+            if (resp.status === "done") {
+                if (progBar) progBar.style.width = "100%";
+                if (progText) progText.textContent = "Complete!";
+                setTimeout(function() { if (progWrap) progWrap.style.display = "none"; }, 2000);
+                return resp;
+            }
+            if (resp.status === "error") {
+                if (progWrap) progWrap.style.display = "none";
+                return resp;
+            }
+            var dots = ".".repeat((i % 3) + 1);
+            btn.innerHTML = '<span class="spin"></span> Processing' + dots;
+        } catch (e) {
+            console.warn("Poll error:", e);
+        }
+    }
+    if (progWrap) progWrap.style.display = "none";
+    return { status: "error", result: { error: "Timed out waiting for pricing update." } };
 }
 
 async function forceBaseline() {
@@ -475,7 +536,57 @@ async function forceBaseline() {
             showAlert("Error: " + data.error, "danger");
         }
     } catch (e) {
-        showAlert("Error: " + e.message, "danger");
+        showAlert("Something went wrong while setting baseline.", "danger");
+        console.error("Force baseline error:", e);
+    }
+}
+
+// == Manual Rate Override ==
+
+async function submitManualRate() {
+    var rate18 = parseFloat(document.getElementById("mr-18kt").value);
+    var rate14 = parseFloat(document.getElementById("mr-14kt").value);
+    var rate9  = document.getElementById("mr-9kt").value ? parseFloat(document.getElementById("mr-9kt").value) : null;
+    var fine   = document.getElementById("mr-fine").value ? parseFloat(document.getElementById("mr-fine").value) : null;
+    var statusEl = document.getElementById("manual-rate-status");
+
+    if (!rate18 || !rate14 || rate18 <= 0 || rate14 <= 0) {
+        statusEl.innerHTML = '<span style="color:var(--red)">18KT and 14KT rates are required and must be positive.</span>';
+        return;
+    }
+
+    if (!confirm("Set manual gold rates as baseline? Use this only when IBJA is unavailable.")) return;
+
+    var btn = document.getElementById("btn-manual-rate");
+    btn.disabled = true;
+    btn.textContent = "Saving\u2026";
+
+    try {
+        var payload = { rate_18kt: rate18, rate_14kt: rate14 };
+        if (rate9 !== null) payload.rate_9kt = rate9;
+        if (fine !== null) payload.fine_gold = fine;
+
+        var data = await api("/api/rates/manual", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (data.ok) {
+            statusEl.innerHTML = '<span style="color:var(--green)">\u2713 ' + data.message + '</span>';
+            showAlert(data.message, "success");
+            addLiveFeedItem("info", "Manual rate override applied");
+            await Promise.all([fetchStoredRate(), fetchHistory()]);
+            updateDelta();
+        } else {
+            statusEl.innerHTML = '<span style="color:var(--red)">' + (data.error || "Failed") + '</span>';
+        }
+    } catch (e) {
+        statusEl.innerHTML = '<span style="color:var(--red)">Something went wrong.</span>';
+        console.error("Manual rate error:", e);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Set Manual Rate";
     }
 }
 
@@ -517,7 +628,8 @@ async function runDiamondUpdate() {
 
         await Promise.all([fetchSheets(), fetchDiamondLogs()]);
     } catch (e) {
-        statusEl.innerHTML = '<span style="color:var(--red)">Error: ' + e.message + '</span>';
+        statusEl.innerHTML = '<span style="color:var(--red)">Something went wrong. Please try again.</span>';
+        console.error("Diamond update error:", e);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '\u2666 Run Diamond Update';
@@ -555,7 +667,8 @@ async function uploadFile() {
             infoEl.textContent = "Upload failed";
         }
     } catch (e) {
-        showAlert('\u2717 ' + e.message, "danger");
+        showAlert('\u2717 Upload failed. Please try again.', "danger");
+        console.error("Upload error:", e);
         infoEl.textContent = "Upload error";
     }
 
@@ -875,16 +988,28 @@ async function toggleAutomation() {
         if (data.ok) {
             _applyAutomationUI(data);
         } else {
-            showAlert("error", data.error || "Toggle failed");
+            showAlert(data.error || "Toggle failed", "danger");
             // Revert checkbox to previous state on failure
             if (input) input.checked = !input.checked;
         }
     } catch(e) {
-        showAlert("error", "Network error");
+        showAlert("Network error", "danger");
         if (input) input.checked = !input.checked;
     } finally {
         if (input) input.disabled = false;
     }
+}
+
+
+async function refreshLiveDashboard() {
+    // Keep "live" cards fresh without forcing heavy table refreshes every few seconds.
+    await Promise.allSettled([
+        fetchLiveRates(),
+        fetchStoredRate(),
+        fetchHistory(),
+        loadAutomationStatus(),
+    ]);
+    updateOverview();
 }
 
 // ─── User Management (admin only) ───────────────────────────────────────────
@@ -1083,4 +1208,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
     // Also update overview after a delay
     setTimeout(updateOverview, 3000);
+
+    // Poll for fresh rates/status to avoid stale "live" UI.
+    setInterval(refreshLiveDashboard, 60000);
 });

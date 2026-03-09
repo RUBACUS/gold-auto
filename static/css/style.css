@@ -12,14 +12,14 @@ header{position:sticky;top:0;z-index:100;background:var(--white);border-bottom:1
 .h-right{display:flex;align-items:center;gap:14px}
 .logo{width:22px;height:22px;border:2px solid var(--gold);transform:rotate(45deg);flex-shrink:0;position:relative}
 .logo::after{content:'';position:absolute;inset:4px;background:var(--gold)}
-.brand{font-size:0.95rem;font-weight:500;color:var(--text-1)}
+.brand{font-size:0.95rem;font-weight:500;color:var(--text-1);white-space:nowrap}
 .brand span{color:var(--gold)}
 .vr{width:1px;height:18px;background:var(--border-dark);opacity:0.5}
 .h-meta{font-size:0.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:0.06em}
-.status-pill{display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-2)}
+.status-pill{display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-2);flex-shrink:0}
 .s-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 2s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
-.user-chip{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--border);font-size:0.75rem;color:var(--text-2);cursor:pointer;transition:border-color .15s}
+.user-chip{display:flex;align-items:center;gap:7px;padding:4px 12px;border:1px solid var(--border);font-size:0.75rem;color:var(--text-2);cursor:pointer;transition:border-color .15s;flex-shrink:0;margin-left:auto}
 .user-chip:hover{border-color:var(--gold)}
 .role-badge{background:var(--gold);color:#fff;padding:1px 6px;font-size:0.62rem;font-weight:500;text-transform:uppercase;letter-spacing:0.07em}
 .logout-btn{background:none;border:1px solid var(--border);padding:3px 8px;font-size:0.7rem;color:var(--text-3);cursor:pointer;transition:border-color .15s,color .15s}
@@ -100,7 +100,7 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .htab:hover{color:var(--text-2)}.htab.active{color:var(--gold);border-bottom-color:var(--gold)}
 /* Hero Tab Content */
 .hero-tab-content{display:none}.hero-tab-content.active{display:block}
-.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:0 12px 0 0;min-height:80px;max-height:340px;overflow-x:auto;overflow-y:auto}
+.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:0 0 16px 0;min-height:80px;max-height:340px;overflow-x:auto;overflow-y:auto}
 .htab-panel .empty-state{padding:28px 20px}
 .htab-panel .data-table{width:100%;min-width:380px;border-collapse:collapse}
 .htab-panel .data-table th{font-size:0.65rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;padding:10px 18px;text-align:left;border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--white)}
@@ -109,6 +109,14 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .htab-panel .data-table tr:hover td{background:var(--bg)}
 .htab-panel .data-table .mono{font-family:'Ubuntu Mono',monospace}
 .htab-panel .data-table .fw{font-weight:600}
+#htab-overview .htab-panel{padding:10px 14px 16px}
+#htab-overview .htab-panel{max-height:none;overflow:visible;border:none}
+#htab-overview .overview-dev-box{border:1px solid var(--border);background:var(--white)}
+#htab-overview .data-table{border:none;table-layout:fixed}
+#htab-overview .data-table th,#htab-overview .data-table td{padding:11px 16px;line-height:1.25}
+#htab-overview .data-table tbody tr{height:46px}
+#htab-overview .data-table td{vertical-align:middle}
+#htab-overview .data-table td .badge-sm{line-height:1.1}
 .badge-sm{font-size:0.6rem;padding:1px 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:inline-block}
 .badge-success{background:var(--green-bg);color:var(--green);border:1px solid rgba(26,122,68,0.2)}
 .badge-danger{background:var(--red-bg);color:var(--red);border:1px solid rgba(192,57,43,0.2)}
@@ -118,7 +126,7 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .delta-positive{color:var(--red);font-weight:500}.delta-negative{color:var(--green);font-weight:500}
 .empty-state{text-align:center;padding:24px;color:var(--text-3);font-size:0.78rem}
 /* Rate Strip */
-.rate-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}
+.rate-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:24px}
 .rc{background:var(--white);border:1px solid var(--border);padding:14px 16px}
 .rc-label{font-size:0.62rem;color:var(--text-3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:5px}
 .rc-val{font-size:1.15rem;font-weight:700;color:var(--text-1);font-family:'Ubuntu Mono',monospace}
@@ -162,6 +170,14 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .btn-sm{padding:4px 10px;font-size:0.65rem}
 .btn .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spinning 0.6s linear infinite}
 @keyframes spinning{to{transform:rotate(360deg)}}
+/* Skeleton Loading */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skeleton{background:linear-gradient(90deg,var(--surface) 25%,rgba(0,0,0,0.04) 50%,var(--surface) 75%);background-size:800px 100%;animation:shimmer 1.5s infinite;border-radius:4px}
+.skeleton-line{height:14px;margin:8px 0;width:100%}
+.skeleton-line.w60{width:60%}.skeleton-line.w40{width:40%}.skeleton-line.w80{width:80%}
+.skeleton-box{height:80px;margin:10px 0;width:100%}
+.skeleton-row{display:flex;gap:12px;margin:8px 0}
+.skeleton-row .skeleton{flex:1;height:14px}
 /* Tabs Section */
 .tabs-section{background:var(--white);border:1px solid var(--border)}
 .tabs-nav{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
@@ -278,21 +294,20 @@ body{overflow-x:hidden}
 @media(max-width:768px){
   html{font-size:14px}
 
-  /* Header */
-  header{padding:0 16px;height:auto;min-height:52px;flex-wrap:wrap;
-         gap:6px;padding-top:8px;padding-bottom:8px}
-  .h-left{flex-wrap:wrap;gap:6px 10px}
-  .h-meta{order:10;flex-basis:100%;font-size:0.58rem;letter-spacing:0.05em;margin-top:-2px}
+  /* Header: always keep user-chip on the right, never wrap to next line */
+  header{padding:8px 16px;height:auto;min-height:52px;flex-wrap:nowrap;gap:8px;align-items:center}
+  .h-left{flex:1;min-width:0;overflow:hidden;flex-wrap:nowrap;gap:6px 8px}
+  .h-meta{display:none}
   .h-left .vr{display:none}
   #clock{display:none}
-  .user-chip{padding:3px 8px;gap:5px}
+  .user-chip{padding:4px 10px;gap:5px;flex-shrink:0;margin-left:auto}
   /* Automation bar */
   .auto-bar{padding:5px 16px;font-size:0.73rem}
   /* Tab panel padding */
   .htab-panel .data-table th,.htab-panel .data-table td{padding:9px 14px}
 
   /* Page */
-  .page-wrap{padding:12px 14px 32px;gap:12px}
+  .page-wrap{padding:14px 16px 36px;gap:12px}
 
   /* Hero */
   .hero-panel{padding:16px 16px 0}
@@ -329,22 +344,27 @@ body{overflow-x:hidden}
   .brand{font-size:0.82rem}
   .status-pill{font-size:0.68rem;gap:4px}
   .s-dot{width:5px;height:5px}
-  .h-left{gap:8px}
-  header{padding:8px 12px}
+  .h-left{gap:6px}
+  header{padding:8px 14px}
+  .user-chip{padding:4px 8px;gap:4px}
   /* Automation bar */
   .auto-bar{padding:5px 12px;font-size:0.7rem;gap:8px}
 
   /* Page */
-  .page-wrap{padding:10px 12px 28px;gap:10px}
+  .page-wrap{padding:12px 16px 32px;gap:10px}
 
   /* Hero */
-  .hero-panel{padding:12px 12px 0}
+  .hero-panel{padding:14px 16px 0}
   .price-hero{font-size:2rem}
   .price-change{font-size:0.82rem}
   .range-val{width:58px;font-size:0.72rem}
 
-  /* Hero tab tables: enforce min-width so inner data tables scroll properly */
-  .htab-panel .data-table{min-width:420px}
+  /* Overview table: fluid, no scroll — STATUS col hidden */
+  #htab-overview .data-table{min-width:0;width:100%}
+  #htab-overview .data-table th:nth-child(3),
+  #htab-overview .data-table td:nth-child(3){display:none}
+  /* Rate History & Logs: keep min-width so multi-column tables scroll */
+  #htab-history .data-table,#htab-logs .data-table{min-width:480px}
 
   /* Hide date column on file tables */
   .col-date{display:none!important}
@@ -377,15 +397,16 @@ body{overflow-x:hidden}
 
   /* Header: hide role badge, shrink logout */
   .role-badge{display:none}
-  .logout-btn{padding:3px 6px;font-size:0.65rem}
+  .logout-btn{padding:4px 8px;font-size:0.65rem}
+  .user-chip{padding:3px 8px;gap:4px}
 
   /* Automation bar */
-  .auto-bar{padding:4px 10px;font-size:0.68rem;gap:6px}
+  .auto-bar{padding:4px 12px;font-size:0.68rem;gap:6px}
   .auto-toggle-btn{padding:2px 8px;font-size:0.65rem}
 
   /* Page */
-  .page-wrap{padding:8px 10px 24px;gap:8px}
-  .hero-panel{padding:10px 10px 0}
+  .page-wrap{padding:10px 12px 28px;gap:8px}
+  .hero-panel{padding:12px 12px 0}
   .htab-panel .data-table th,.htab-panel .data-table td{padding:7px 10px}
 
   /* Hero price */
@@ -421,13 +442,45 @@ body{overflow-x:hidden}
   html{font-size:12.5px}
   .brand{font-size:0.72rem;letter-spacing:0}
   .price-hero{font-size:1.5rem}
-  .page-wrap{padding:6px 8px 20px;gap:6px}
-  .hero-panel{padding:8px 8px 0}
+  .page-wrap{padding:8px 10px 20px;gap:6px}
+  .hero-panel{padding:8px 10px 0}
   .htab-panel .data-table th,.htab-panel .data-table td{padding:6px 8px}
   .sh-head,.uf-head,.sh-row,.uf-row{padding:6px 8px}
   .rc-val{font-size:1rem}
   .auto-bar{padding:3px 8px;gap:6px}
   .auto-toggle-btn{font-size:0.62rem;padding:2px 6px}
+}
+
+/* -- iOS safe-area inset support (notch / home bar) ---------------------- */
+@supports(padding:max(0px)){
+  header{
+    padding-left:max(28px,calc(env(safe-area-inset-left) + 14px));
+    padding-right:max(28px,calc(env(safe-area-inset-right) + 14px));
+  }
+  .auto-bar{
+    padding-left:max(20px,calc(env(safe-area-inset-left) + 8px));
+    padding-right:max(20px,calc(env(safe-area-inset-right) + 8px));
+  }
+  .page-wrap{
+    padding-left:max(24px,calc(env(safe-area-inset-left) + 8px));
+    padding-right:max(24px,calc(env(safe-area-inset-right) + 8px));
+    padding-bottom:max(48px,calc(env(safe-area-inset-bottom) + 32px));
+  }
+  @media(max-width:768px){
+    header{
+      padding-left:max(16px,calc(env(safe-area-inset-left) + 10px));
+      padding-right:max(16px,calc(env(safe-area-inset-right) + 10px));
+    }
+    .auto-bar{
+      padding-left:max(16px,calc(env(safe-area-inset-left) + 8px));
+      padding-right:max(16px,calc(env(safe-area-inset-right) + 8px));
+    }
+    .page-wrap{
+      padding-left:max(16px,calc(env(safe-area-inset-left) + 8px));
+      padding-right:max(16px,calc(env(safe-area-inset-right) + 8px));
+      padding-bottom:max(36px,calc(env(safe-area-inset-bottom) + 24px));
+    }
+  }
 }
 
 /* -- Touch devices: larger tap targets, prevent iOS input zoom ------------ */
