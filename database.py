@@ -415,11 +415,81 @@ def authenticate_user(username, password):
 def get_all_users():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT id, username, role FROM users")
+    c.execute("SELECT id, username, role FROM users ORDER BY id")
     rows = c.fetchall()
     c.close()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def create_user(username, password, role):
+    """Create a new user. Returns (True, user_dict) or (False, error_str)."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s) RETURNING id",
+            (username, generate_password_hash(password), role),
+        )
+        new_id = c.fetchone()["id"]
+        conn.commit()
+        return True, {"id": new_id, "username": username, "role": role}
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return False, "Username already exists"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        c.close()
+        conn.close()
+
+
+def update_user(user_id, username=None, password=None, role=None):
+    """Update username, password, and/or role for a user. Returns (True, None) or (False, error_str)."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        if username:
+            c.execute("UPDATE users SET username=%s WHERE id=%s", (username, user_id))
+        if password:
+            c.execute("UPDATE users SET password_hash=%s WHERE id=%s",
+                      (generate_password_hash(password), user_id))
+        if role:
+            c.execute("UPDATE users SET role=%s WHERE id=%s", (role, user_id))
+        conn.commit()
+        return True, None
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return False, "Username already exists"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        c.close()
+        conn.close()
+
+
+def delete_user(user_id):
+    """Delete a user by id. Returns True if found and deleted."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM users WHERE id=%s", (user_id,))
+    rowcount = c.rowcount
+    conn.commit()
+    c.close()
+    conn.close()
+    return rowcount > 0
+
+
+def get_user_by_id(user_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, username, role FROM users WHERE id=%s", (user_id,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return dict(row) if row else None
 
 
 # â”€â”€ Uploaded Files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

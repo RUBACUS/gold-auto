@@ -157,9 +157,10 @@ async function fetchLiveRates() {
             '<div class="range-row"><span class="range-val">9 KT</span><div class="range-bar-wrap"><div class="range-bar-fill" style="width:50%"></div><span class="range-dot" style="left:50%"></span></div><span class="range-val hi">' + fmt(liveRates["9kt"]) + '</span></div>';
     }
 
-    // Rate strip - Live card
-    document.getElementById("live-18kt").textContent = fmt(liveRates["18kt"]);
+    // Rate strip - Live card (show 24KT / fine gold as main)
+    document.getElementById("live-18kt").textContent = fmt(liveRates["fine_gold"] || liveRates["18kt"]);
     document.getElementById("live-karats").innerHTML =
+        '<span class="kt-val">18KT: ' + fmt(liveRates["18kt"]) + '</span>' +
         '<span class="kt-val">14KT: ' + fmt(liveRates["14kt"]) + '</span>' +
         '<span class="kt-val">9KT: ' + fmt(liveRates["9kt"]) + '</span>';
     document.getElementById("live-session").textContent = sessionBadge + " \u00b7 " + (liveRates.date || "");
@@ -183,8 +184,9 @@ async function fetchStoredRate() {
     }
 
     storedRate = data.rate;
-    document.getElementById("stored-18kt").textContent = fmt(storedRate.rate_18kt);
+    document.getElementById("stored-18kt").textContent = fmt(storedRate.rate_fine || storedRate.rate_18kt);
     document.getElementById("stored-karats").innerHTML =
+        '<span class="kt-val">18KT: ' + fmt(storedRate.rate_18kt) + '</span>' +
         '<span class="kt-val">14KT: ' + fmt(storedRate.rate_14kt) + '</span>' +
         '<span class="kt-val">9KT: ' + fmt(storedRate.rate_9kt) + '</span>';
     document.getElementById("stored-ts").textContent = fmtDate(storedRate.timestamp) + " \u00b7 " + (storedRate.session || "");
@@ -216,8 +218,9 @@ function updateDelta() {
 
     function cls(d) { return d > 0 ? "delta-positive" : d < 0 ? "delta-negative" : ""; }
 
-    document.getElementById("delta-18kt").innerHTML = '<span class="' + cls(d18) + '">' + fmtDelta(d18) + '/g</span>';
+    document.getElementById("delta-18kt").innerHTML = '<span class="' + cls(d24) + '">' + fmtDelta(d24) + '/g</span>';
     document.getElementById("delta-karats").innerHTML =
+        '<span class="kt-val ' + cls(d18) + '">18KT: ' + fmtDelta(d18) + '</span>' +
         '<span class="kt-val ' + cls(d14) + '">14KT: ' + fmtDelta(d14) + '</span>' +
         '<span class="kt-val ' + cls(d9) + '">9KT: ' + fmtDelta(d9) + '</span>';
     document.getElementById("delta-status").innerHTML = needUpdate
@@ -881,6 +884,168 @@ async function toggleAutomation() {
     }
 }
 
+// ─── User Management (admin only) ───────────────────────────────────────────
+
+var _umUsers   = [];   // cached user list
+var _umEditId  = null; // null = adding new, number = editing existing
+
+function umFetch() {
+    fetch("/api/users", { credentials: "include" })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            _umUsers = data.users || [];
+            umRender();
+        })
+        .catch(function() {
+            document.getElementById("um-body").innerHTML =
+                '<div class="empty-state">Failed to load users.</div>';
+        });
+}
+
+function umRender() {
+    var body = document.getElementById("um-body");
+    if (!body) return;
+    if (!_umUsers.length) {
+        body.innerHTML = '<div class="empty-state">No users found.</div>';
+        return;
+    }
+    var rows = _umUsers.map(function(u) {
+        var roleClass = u.role === "editor" ? "um-badge-editor"
+                      : u.role === "admin"  ? "um-badge-admin"
+                      : "um-badge-viewer";
+        var isSelf    = u.id === _umSelfId;
+        var isAdminAc = u.username === "admin";
+        var editBtn   = '<button class="btn btn-out btn-sm" onclick="umOpenEdit(' + u.id + ')">'
+                      + 'Edit</button>';
+        var delBtn    = (!isSelf && !isAdminAc)
+                      ? '<button class="btn btn-danger btn-sm" onclick="umDelete(' + u.id + ',\'' + u.username.replace(/'/g,"\\'")+'\')">Del</button>'
+                      : '';
+        return '<tr>'
+             + '<td class="um-td">' + u.id + '</td>'
+             + '<td class="um-td"><strong>' + _esc(u.username) + '</strong></td>'
+             + '<td class="um-td"><span class="um-badge ' + roleClass + '">' + u.role + '</span></td>'
+             + '<td class="um-td um-actions">' + editBtn + ' ' + delBtn + '</td>'
+             + '</tr>';
+    }).join("");
+    body.innerHTML = '<table class="um-table"><thead><tr>'
+        + '<th class="um-th">#</th>'
+        + '<th class="um-th">Username</th>'
+        + '<th class="um-th">Role</th>'
+        + '<th class="um-th">Actions</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function _esc(str) {
+    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+var _umSelfId = null;
+function _umFindSelfId() {
+    // self-detect: the current user won't have a delete button; we know username via server var
+    // We'll detect by checking the admin username (always id 1 in practice)
+    // Actually, let's call /api/users just to match; we can mark self if we know username
+    // We will rely on a JS constant CURRENT_USER_ID injected from template
+    if (typeof CURRENT_USER_ID !== "undefined") _umSelfId = CURRENT_USER_ID;
+}
+
+function umOpenAdd() {
+    _umEditId = null;
+    document.getElementById("um-f-username").value = "";
+    document.getElementById("um-f-password").value = "";
+    document.getElementById("um-f-role").value     = "viewer";
+    document.getElementById("um-f-username").removeAttribute("readonly");
+    document.getElementById("um-form-save").textContent = "Create User";
+    umSetError("");
+    document.getElementById("um-form").style.display = "";
+    document.getElementById("um-f-username").focus();
+}
+
+function umOpenEdit(userId) {
+    var u = _umUsers.find(function(x){ return x.id === userId; });
+    if (!u) return;
+    _umEditId = userId;
+    document.getElementById("um-f-username").value = u.username;
+    document.getElementById("um-f-password").value = "";
+    document.getElementById("um-f-role").value     = u.role === "admin" ? "editor" : u.role;
+    // If editing admin account: lock role field
+    if (u.username === "admin") {
+        document.getElementById("um-f-role").setAttribute("disabled", "disabled");
+    } else {
+        document.getElementById("um-f-role").removeAttribute("disabled");
+    }
+    document.getElementById("um-f-username").setAttribute("readonly", "readonly");
+    document.getElementById("um-form-save").textContent = "Save Changes";
+    umSetError("");
+    document.getElementById("um-form").style.display = "";
+}
+
+function umCloseForm() {
+    _umEditId = null;
+    document.getElementById("um-form").style.display = "none";
+    document.getElementById("um-f-role").removeAttribute("disabled");
+    umSetError("");
+}
+
+function umSetError(msg) {
+    var el = document.getElementById("um-error");
+    if (!el) return;
+    if (msg) {
+        el.textContent = msg;
+        el.style.display = "";
+    } else {
+        el.textContent = "";
+        el.style.display = "none";
+    }
+}
+
+function umSave() {
+    var username = document.getElementById("um-f-username").value.trim();
+    var password = document.getElementById("um-f-password").value;
+    var role     = document.getElementById("um-f-role").value;
+    if (!username) { umSetError("Username is required."); return; }
+    if (_umEditId === null && !password) { umSetError("Password is required for new users."); return; }
+
+    var url    = _umEditId === null ? "/api/users" : "/api/users/" + _umEditId;
+    var method = _umEditId === null ? "POST"        : "PATCH";
+    var body   = { username: username, role: role };
+    if (password) body.password = password;
+
+    document.getElementById("um-form-save").disabled = true;
+    fetch(url, {
+        method: method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN },
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(d){ return {ok:r.ok, d:d}; }); })
+    .then(function(res) {
+        document.getElementById("um-form-save").disabled = false;
+        if (!res.ok) { umSetError(res.d.error || "Error saving user."); return; }
+        umCloseForm();
+        umFetch();
+    })
+    .catch(function() {
+        document.getElementById("um-form-save").disabled = false;
+        umSetError("Network error.");
+    });
+}
+
+function umDelete(userId, username) {
+    if (!confirm("Delete user \"" + username + "\"? This cannot be undone.")) return;
+    fetch("/api/users/" + userId, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "X-CSRF-Token": CSRF_TOKEN }
+    })
+    .then(function(r) { return r.json().then(function(d){ return {ok:r.ok, d:d}; }); })
+    .then(function(res) {
+        if (!res.ok) { umSetError(res.d.error || "Delete failed."); return; }
+        umFetch();
+    })
+    .catch(function() { umSetError("Network error."); });
+}
+
+
 // == Init ==
 
 document.addEventListener("DOMContentLoaded", function() {
@@ -896,6 +1061,11 @@ document.addEventListener("DOMContentLoaded", function() {
     if (typeof USER_ROLE !== "undefined" && USER_ROLE === "editor") {
         fetchConfig();
         fetchActiveFile();
+    }
+
+    if (typeof USER_IS_ADMIN !== "undefined" && USER_IS_ADMIN) {
+        _umFindSelfId();
+        umFetch();
     }
 
     // Update overview when rates load

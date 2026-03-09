@@ -32,6 +32,7 @@ from database import (
     save_generated_file, get_generated_file,
     get_all_generated_files, delete_generated_file_record,
     get_automation_enabled, set_automation_enabled,
+    get_all_users, create_user, update_user, delete_user, get_user_by_id,
 )
 from update_prices import run_update, run_diamond_update, OUTPUT_DIR, get_source_file
 
@@ -171,6 +172,17 @@ def editor_required(f):
             return jsonify({"ok": False, "error": "Not authenticated"}), 401
         if session["user"].get("role") != "editor":
             return jsonify({"ok": False, "error": "Editor access required"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if "user" not in session:
+            return jsonify({"ok": False, "error": "Not authenticated"}), 401
+        if session["user"].get("username") != "admin":
+            return jsonify({"ok": False, "error": "Admin access required"}), 403
         return f(*args, **kwargs)
     return wrapper
 
@@ -605,8 +617,77 @@ def api_diamond_logs():
     logs = get_diamond_update_logs(limit)
     return jsonify({"ok": True, "logs": logs})
 
-# ── API: Automation Toggle ─────────────────────────────────
+# ── API: User Management (admin only) ────────────────────────
 
+@app.route("/api/users")
+@admin_required
+def api_list_users():
+    return jsonify({"ok": True, "users": get_all_users()})
+
+
+@app.route("/api/users", methods=["POST"])
+@admin_required
+def api_create_user():
+    if request.headers.get("X-CSRF-Token") != session.get("_csrf_token"):
+        return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
+    body = request.get_json(force=True, silent=True) or {}
+    username = (body.get("username") or "").strip()
+    password = (body.get("password") or "").strip()
+    role = body.get("role", "viewer")
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Username and password are required"}), 400
+    if role not in ("editor", "viewer"):
+        return jsonify({"ok": False, "error": "Role must be editor or viewer"}), 400
+    ok, result = create_user(username, password, role)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 409
+    return jsonify({"ok": True, "user": result})
+
+
+@app.route("/api/users/<int:user_id>", methods=["PATCH"])
+@admin_required
+def api_update_user(user_id):
+    if request.headers.get("X-CSRF-Token") != session.get("_csrf_token"):
+        return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
+    # Prevent editing the admin account's username
+    target = get_user_by_id(user_id)
+    if not target:
+        return jsonify({"ok": False, "error": "User not found"}), 404
+    body = request.get_json(force=True, silent=True) or {}
+    username = (body.get("username") or "").strip() or None
+    password = (body.get("password") or "").strip() or None
+    role = body.get("role") or None
+    if username and target["username"] == "admin":
+        username = None  # Silently disallow renaming admin
+    if role and role not in ("editor", "viewer"):
+        return jsonify({"ok": False, "error": "Role must be editor or viewer"}), 400
+    if target["username"] == "admin" and role == "viewer":
+        return jsonify({"ok": False, "error": "Cannot demote admin to viewer"}), 400
+    ok, err = update_user(user_id, username=username, password=password, role=role)
+    if not ok:
+        return jsonify({"ok": False, "error": err}), 409
+    updated = get_user_by_id(user_id)
+    return jsonify({"ok": True, "user": updated})
+
+
+@app.route("/api/users/<int:user_id>", methods=["DELETE"])
+@admin_required
+def api_delete_user(user_id):
+    if request.headers.get("X-CSRF-Token") != session.get("_csrf_token"):
+        return jsonify({"ok": False, "error": "Invalid CSRF token"}), 403
+    target = get_user_by_id(user_id)
+    if not target:
+        return jsonify({"ok": False, "error": "User not found"}), 404
+    if target["username"] == "admin":
+        return jsonify({"ok": False, "error": "Cannot delete the admin account"}), 400
+    # Prevent admin from deleting themselves
+    if target["id"] == session["user"].get("id"):
+        return jsonify({"ok": False, "error": "Cannot delete your own account"}), 400
+    delete_user(user_id)
+    return jsonify({"ok": True})
+
+
+# ── API: Automation Toggle ─────────────────────────────────
 @app.route("/api/automation/status")
 @login_required
 def api_automation_status():
