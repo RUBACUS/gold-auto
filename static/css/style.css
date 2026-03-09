@@ -100,7 +100,7 @@ canvas#sparkline{width:100%;height:70px;display:block}
 .htab:hover{color:var(--text-2)}.htab.active{color:var(--gold);border-bottom-color:var(--gold)}
 /* Hero Tab Content */
 .hero-tab-content{display:none}.hero-tab-content.active{display:block}
-.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:0;min-height:80px;max-height:340px;overflow-x:auto;overflow-y:auto}
+.htab-panel{background:var(--white);border:1px solid var(--border);border-top:none;padding:0 12px 0 0;min-height:80px;max-height:340px;overflow-x:auto;overflow-y:auto}
 .htab-panel .empty-state{padding:28px 20px}
 .htab-panel .data-table{width:100%;min-width:380px;border-collapse:collapse}
 .htab-panel .data-table th{font-size:0.65rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.07em;padding:10px 18px;text-align:left;border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--white)}
@@ -279,7 +279,8 @@ body{overflow-x:hidden}
   /* Header */
   header{padding:0 16px;height:auto;min-height:52px;flex-wrap:wrap;
          gap:6px;padding-top:8px;padding-bottom:8px}
-  .h-meta{display:none}
+  .h-left{flex-wrap:wrap;gap:6px 10px}
+  .h-meta{order:10;flex-basis:100%;font-size:0.58rem;letter-spacing:0.05em;margin-top:-2px}
   .h-left .vr{display:none}
   #clock{display:none}
   .user-chip{padding:3px 8px;gap:5px}
