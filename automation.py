@@ -129,6 +129,7 @@ def stage1_wait_for_rates():
             rate_14kt = float(rates.get("14kt", 0))
             rate_18kt = float(rates.get("18kt", 0))
             rate_9kt = float(rates.get("9kt", 0))
+            rate_fine_gold = float(rates.get("fine_gold", 0))
 
             # Check freshness
             if rate_date != today:
@@ -154,13 +155,15 @@ def stage1_wait_for_rates():
                     )
 
             print(f"[{_ts()}] [Stage 1] Fresh {session_name} rates confirmed: "
-                  f"14KT={rate_14kt:,.0f}, 18KT={rate_18kt:,.0f}, 9KT={rate_9kt:,.0f}")
+                  f"14KT={rate_14kt:,.0f}, 18KT={rate_18kt:,.0f}, 9KT={rate_9kt:,.0f}, "
+                  f"Fine Gold={rate_fine_gold:,.0f}")
             return {
                 "session": session_name,
                 "rate_date": rate_date,
                 "rate_14kt": rate_14kt,
                 "rate_18kt": rate_18kt,
                 "rate_9kt": rate_9kt,
+                "fine_gold": rate_fine_gold,
             }
 
         except Exception as e:
@@ -325,6 +328,15 @@ def stage5_notify(rates, row_count, variants_done, products_done,
 
 def stage6_update_rate_metaobject(rates):
     from shopify_push import GRAPHQL_URL, HEADERS
+
+    fine_gold = rates.get("fine_gold")
+    if not fine_gold:
+        print(f"[{_ts()}] [Stage 6] ⚠️  'fine_gold' not in rates dict — skipping metaobject update.")
+        send_telegram(
+            f"⚠️ <b>Stage 6 — Skipped</b>\n"
+            f"Fine Gold (999) rate not available in this run.\nTime: {now_ist()}"
+        )
+        return False
 
     print(f"\n[{_ts()}] [Stage 6] Updating Gold Rate metaobject in Shopify...")
 
