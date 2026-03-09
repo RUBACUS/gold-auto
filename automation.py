@@ -182,18 +182,50 @@ def stage3_run_pricing(csv_path):
                         f"{upload_resp.text[:200]}")
     print(f"[{_ts()}] [Stage 3] CSV uploaded successfully.")
 
-    # Run pricing
+    # Run pricing (async — poll until done)
     print(f"[{_ts()}] [Stage 3] Running pricing engine...")
     run_resp = session.post(
         f"{FLASK_APP_URL}/api/update/run",
         headers=headers,
-        timeout=300,
+        timeout=60,
     )
     if run_resp.status_code != 200:
         raise Exception(f"Pricing run failed: HTTP {run_resp.status_code} — "
                         f"{run_resp.text[:200]}")
 
-    run_data = run_resp.json()
+    run_start = run_resp.json()
+    task_id = run_start.get("task_id")
+
+    if task_id:
+        # Background task — poll /api/update/status/<task_id> until done
+        import time as _time
+        max_wait = 600   # 10 minutes
+        poll_interval = 5
+        elapsed = 0
+        run_data = None
+        while elapsed < max_wait:
+            _time.sleep(poll_interval)
+            elapsed += poll_interval
+            status_resp = session.get(
+                f"{FLASK_APP_URL}/api/update/status/{task_id}",
+                timeout=30,
+            )
+            if status_resp.status_code != 200:
+                continue
+            status_data = status_resp.json()
+            if status_data.get("status") == "done":
+                run_data = status_data.get("result", {})
+                break
+            if status_data.get("status") == "error":
+                err = (status_data.get("result") or {}).get("error", "Unknown error")
+                raise Exception(f"Pricing task failed: {err}")
+            print(f"[{_ts()}] [Stage 3] Waiting for pricing engine… ({elapsed}s)")
+        if run_data is None:
+            raise Exception(f"Pricing task timed out after {max_wait}s (task_id={task_id})")
+    else:
+        # Synchronous response (fallback)
+        run_data = run_start
+
     output_file = run_data.get("output_file") or run_data.get("filename")
     if not output_file:
         raise Exception(f"Pricing run response had no output filename: {run_data}")
