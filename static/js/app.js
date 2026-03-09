@@ -16,7 +16,8 @@ function fmtDate(iso) {
     var d = new Date(iso);
     return d.toLocaleString("en-IN", {
         day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit", hour12: true
+        hour: "2-digit", minute: "2-digit", hour12: true,
+        timeZone: "Asia/Kolkata"
     });
 }
 
@@ -66,7 +67,8 @@ function tickClock() {
         var now = new Date();
         el.textContent = now.toLocaleString("en-IN", {
             weekday: "short", day: "2-digit", month: "short", year: "numeric",
-            hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+            hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
+            timeZone: "Asia/Kolkata"
         });
     }
 }
@@ -288,8 +290,8 @@ function drawSparkline() {
     if (xaxis && rateHistory.length > 1) {
         var labels = rateHistory.slice(-12);
         var first = labels[0], last = labels[labels.length - 1];
-        xaxis.innerHTML = '<span>' + (first.timestamp ? new Date(first.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "") + '</span><span>' +
-            (last.timestamp ? new Date(last.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "") + '</span>';
+        xaxis.innerHTML = '<span>' + (first.timestamp ? new Date(first.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "") + '</span><span>' +
+            (last.timestamp ? new Date(last.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "") + '</span>';
     }
 }
 
@@ -809,7 +811,7 @@ function addLiveFeedItem(type, text) {
     if (empty) empty.remove();
 
     var dotClass = type === 'success' ? 'success' : type === 'fail' ? 'fail' : 'info';
-    var now = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    var now = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" });
 
     var item = document.createElement("div");
     item.className = "lf-item";
