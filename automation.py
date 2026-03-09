@@ -264,7 +264,7 @@ def stage4_push_prices(output_csv):
 
 def stage5_notify(rates, row_count, variants_done, products_done,
                   push_success, failed_products, push_summary, duration_sec,
-                  metaobject_ok=True):
+                  meta_ok=0, meta_total=6):
     minutes = int(duration_sec // 60)
     seconds = int(duration_sec % 60)
     session_name = rates["session"]
@@ -292,7 +292,10 @@ def stage5_notify(rates, row_count, variants_done, products_done,
             f"({failure_pct:.2f}% of {total_products}, threshold {threshold_pct:.2f}%)!"
         )
 
-    rate_display_line = "🔢 Rate Display: Updated" if metaobject_ok else "🔢 Rate Display: Failed — check logs"
+    if meta_ok == meta_total:
+        rate_display_line = f"🔢 Display Rates: {meta_ok}/{meta_total} updated"
+    else:
+        rate_display_line = f"⚠️ Display Rates: {meta_ok}/{meta_total} updated — see logs"
 
     msg = (
         f"{status_icon} <b>TaaraLaxmii Pricing Updated</b>\n"
@@ -324,74 +327,111 @@ def stage5_notify(rates, row_count, variants_done, products_done,
     send_telegram(msg)
 
 
-# ── Stage 6 — Update Gold Rate Metaobject ────────────────────
+# ── Stage 6 — Update Display Metaobjects ─────────────────────
 
-def stage6_update_rate_metaobject(rates):
-    from shopify_push import GRAPHQL_URL, HEADERS
+def stage6_update_display_metaobjects(rates):
+    import json as _json
+    from shopify_push import _graphql_request
 
-    fine_gold = rates.get("fine_gold")
-    if not fine_gold:
-        print(f"[{_ts()}] [Stage 6] ⚠️  'fine_gold' not in rates dict — skipping metaobject update.")
-        send_telegram(
-            f"⚠️ <b>Stage 6 — Skipped</b>\n"
-            f"Fine Gold (999) rate not available in this run.\nTime: {now_ist()}"
-        )
-        return False
+    # ── Metaobject GIDs (confirmed, do not change) ──
+    GID_GOLD_RATE        = "gid://shopify/Metaobject/169970499905"
+    GID_COLOR_STONE      = "gid://shopify/Metaobject/170368336193"
+    GID_MAKING_CHARGE    = "gid://shopify/Metaobject/169319760193"
+    GID_HUID             = "gid://shopify/Metaobject/169319792961"
+    GID_DIAMOND_DISCOUNT = "gid://shopify/Metaobject/169813016897"
+    GID_DIAMOND_CERT     = "gid://shopify/Metaobject/169319825729"
 
-    print(f"\n[{_ts()}] [Stage 6] Updating Gold Rate metaobject in Shopify...")
+    # ── Fetch rate config from Flask ──
+    print(f"\n[{_ts()}] [Stage 6] Fetching rate config from Flask...")
+    _s = requests.Session()
+    _s.post(
+        f"{FLASK_APP_URL}/api/auth/login",
+        json={"username": FLASK_EDITOR_USER, "password": FLASK_EDITOR_PASS},
+        timeout=20,
+    )
+    config_resp = _s.get(f"{FLASK_APP_URL}/api/config", timeout=20)
+    config = config_resp.json()["config"]
 
     mutation = """
-    mutation UpdateGoldRateMetaobject($id: ID!, $fields: [MetaobjectFieldInput!]!) {
-      metaobjectUpdate(id: $id, metaobject: { fields: $fields }) {
-        metaobject { id }
+    mutation($id: ID!, $fields: [MetaobjectFieldInput!]!) {
+      metaobjectUpdate(id: $id, metaobject: {fields: $fields}) {
+        metaobject { id handle }
         userErrors { field message }
       }
     }
     """
 
-    variables = {
-        "id": "gid://shopify/Metaobject/169970499905",
-        "fields": [
-            {"key": "rate_24kt_999", "value": str(rates["fine_gold"])},
-            {"key": "rate_18kt",     "value": str(rates["rate_18kt"])},
-            {"key": "rate_14kt",     "value": str(rates["rate_14kt"])},
-            {"key": "rate_9kt",      "value": str(rates["rate_9kt"])},
-        ],
-    }
+    def _update_metaobject(gid, fields_dict):
+        fields_list = [{"key": k, "value": str(v)} for k, v in fields_dict.items()]
+        resp = _graphql_request({"query": mutation,
+                                 "variables": {"id": gid, "fields": fields_list}})
+        errors = resp.get("data", {}).get("metaobjectUpdate", {}).get("userErrors", [])
+        if errors:
+            raise Exception(f"userErrors for {gid}: {errors}")
 
-    try:
-        resp = requests.post(
-            GRAPHQL_URL,
-            headers=HEADERS,
-            json={"query": mutation, "variables": variables},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        user_errors = (data.get("data") or {}).get("metaobjectUpdate", {}).get("userErrors", [])
-        if user_errors:
-            err_str = "; ".join(f"{e['field']}: {e['message']}" for e in user_errors)
-            print(f"[{_ts()}] [Stage 6] ⚠️  userErrors: {err_str}")
-            send_telegram(
-                f"⚠️ <b>Stage 6 — Rate Metaobject userErrors</b>\n"
-                f"Prices were pushed successfully, but the rate display metaobject could not be updated.\n"
-                f"Errors: {err_str}\nTime: {now_ist()}"
-            )
-            return False
-        print(
-            f"[{_ts()}] [Stage 6] ✅ Gold Rate metaobject updated — "
-            f"24KT: {rates['fine_gold']}, 18KT: {rates['rate_18kt']}, "
-            f"14KT: {rates['rate_14kt']}, 9KT: {rates['rate_9kt']}"
-        )
-        return True
-    except Exception as e:
-        print(f"[{_ts()}] [Stage 6] ⚠️  Exception: {e}")
+    tasks = [
+        (
+            "Gold Rate",
+            GID_GOLD_RATE,
+            {
+                "rate_24kt_999": rates["fine_gold"],
+                "rate_18kt":     rates["rate_18kt"],
+                "rate_14kt":     rates["rate_14kt"],
+                "rate_9kt":      rates["rate_9kt"],
+            },
+        ),
+        (
+            "Color Stone",
+            GID_COLOR_STONE,
+            {"rate_per_carat": config["colorstone_rate"]},
+        ),
+        (
+            "Making Charge",
+            GID_MAKING_CHARGE,
+            {"making_charge": config["making_charge"]},
+        ),
+        (
+            "HUID Cost",
+            GID_HUID,
+            {"huid": config["huid_per_pc"]},
+        ),
+        (
+            "Diamond Certification",
+            GID_DIAMOND_CERT,
+            {"diamond_certification": config["certification"]},
+        ),
+        (
+            "Diamond Discount",
+            GID_DIAMOND_DISCOUNT,
+            {
+                "gh_si":    _json.dumps({"amount": f"{config['cmp_diamond_si']:.2f}",   "currency_code": "INR"}),
+                "gh_i1_i2": _json.dumps({"amount": f"{config['cmp_diamond_i1i2']:.2f}", "currency_code": "INR"}),
+            },
+        ),
+    ]
+
+    results = {}   # name -> True/False
+    for name, gid, fields in tasks:
+        try:
+            _update_metaobject(gid, fields)
+            print(f"[{_ts()}] [Stage 6] ✅ {name} metaobject updated.")
+            results[name] = True
+        except Exception as e:
+            print(f"[{_ts()}] [Stage 6] ⚠️  {name} failed: {e}")
+            results[name] = False
+
+    ok_count  = sum(1 for v in results.values() if v)
+    fail_names = [n for n, v in results.items() if not v]
+
+    if fail_names:
         send_telegram(
-            f"⚠️ <b>Stage 6 — Rate Metaobject Update Failed</b>\n"
-            f"Prices were pushed successfully, but the rate display metaobject could not be updated.\n"
-            f"Error: {e}\nTime: {now_ist()}"
+            f"⚠️ <b>Stage 6 — Metaobject Partial Failure</b>\n"
+            f"Updated {ok_count}/{len(tasks)} metaobjects.\n"
+            f"Failed: {', '.join(fail_names)}\n"
+            f"Time: {now_ist()}"
         )
-        return False
+
+    return ok_count, len(tasks)
 
 
 # ── MAIN ─────────────────────────────────────────────────────
@@ -458,14 +498,14 @@ def main():
         sys.exit(1)
 
     # ── Stage 6 (non-critical — runs after push, before notify)
-    metaobject_ok = stage6_update_rate_metaobject(rates)
+    meta_ok, meta_total = stage6_update_display_metaobjects(rates)
 
     # ── Stage 5
     duration = time.time() - start_time
     try:
         stage5_notify(rates, row_count, variants_done, products_done,
                       push_success, failed_products, push_summary, duration,
-                      metaobject_ok=metaobject_ok)
+                      meta_ok=meta_ok, meta_total=meta_total)
     except Exception as e:
         print(f"[{_ts()}] [Main] Stage 5 notification error (non-fatal): {e}")
 
